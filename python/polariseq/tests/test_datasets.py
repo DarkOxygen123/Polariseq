@@ -132,7 +132,7 @@ def test_each_cell_keeps_its_dataset(files, proj) -> None:
     ps.pp.harmony_integrate(got, "dataset", seed=0)
     assert got.uns["harmony"]["n_batches"] == 3
     corrected = got.obsm["X_pca_harmony"]  # written by the core into the project
-    assert isinstance(corrected, np.memmap) and "results/harmony" in str(corrected.filename)
+    assert isinstance(corrected, np.memmap) and "results/harmony" in str(corrected.filename).replace("\\", "/")
     out = got.to_anndata()
     assert list(out.obs["dataset"].cat.categories) == ["d1", "d2", "d3"]
 

@@ -3259,6 +3259,33 @@ def needs_disk_backing(path: str) -> bool:
 
 
 
+def _windows_pid_alive(pid: int) -> bool:
+    """Whether a process with this id exists (Windows; os.kill(pid, 0) means Ctrl+C there, not a check).
+
+    A process that cannot be opened for another reason (access denied) counts as alive.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.OpenProcess.restype = wintypes.HANDLE
+    k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    k32.GetExitCodeProcess.restype = wintypes.BOOL
+    k32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    k32.CloseHandle.restype = wintypes.BOOL
+    k32.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return ctypes.get_last_error() != 87  # ERROR_INVALID_PARAMETER: no such process
+    try:
+        code = wintypes.DWORD()
+        if k32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return code.value == 259  # STILL_ACTIVE
+        return True
+    finally:
+        k32.CloseHandle(handle)
+
+
 def _sweep_orphan_spills(spill_dir: str) -> int:
     """Delete spill files left by processes that no longer exist.
 
@@ -3284,15 +3311,22 @@ def _sweep_orphan_spills(spill_dir: str) -> int:
         pid = int(m.group(1))
         if pid == os.getpid():
             continue
-        try:
-            os.kill(pid, 0)
-            continue  # alive
-        except PermissionError:
-            continue  # alive, another user's
-        except ProcessLookupError:
-            pass
-        except OSError:
-            continue
+        if os.name == "nt":
+            try:
+                if _windows_pid_alive(pid):
+                    continue
+            except (OSError, AttributeError):
+                continue  # cannot tell: leave the files alone
+        else:
+            try:
+                os.kill(pid, 0)
+                continue  # alive
+            except PermissionError:
+                continue  # alive, another user's
+            except ProcessLookupError:
+                pass
+            except OSError:
+                continue
         path = os.path.join(spill_dir, name)
         try:
             size = os.path.getsize(path)

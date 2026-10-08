@@ -75,7 +75,7 @@ def test_memory_and_out_of_core_agree_and_results_are_mapped(path, proj):
                                   np.asarray(ooc.obs["doublet_score"]))
     score = ooc.obs["doublet_score"]
     assert isinstance(score, np.memmap)
-    assert "runs/ooc/results/scrublet" in str(score.filename)
+    assert "runs/ooc/results/scrublet" in str(score.filename).replace("\\", "/")
     # Copy-on-write: changing the view leaves the file as the core wrote it.
     first = float(score[0])
     score[0] = 99.0
