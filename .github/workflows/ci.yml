@@ -73,8 +73,12 @@ jobs:
       - name: ruff
         run: ruff check python/ examples/
 
-      - name: Build and install (maturin develop)
-        run: maturin develop --release
+      # Build the wheel and install it, as a user does (maturin develop needs a virtual environment).
+      - name: Build and install the wheel
+        shell: bash
+        run: |
+          maturin build --release --out dist
+          pip install dist/*.whl
 
       - name: pytest
         run: pytest -v

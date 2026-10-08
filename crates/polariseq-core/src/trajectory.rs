@@ -408,6 +408,6 @@ mod tests {
         let result = diffusion_map(&graph, 3).unwrap();
         assert_eq!(result.embedding.len(), 20 * 3);
         assert_eq!(result.n_components, 3);
-        assert!(result.eigenvalues.len() == 3);
+        assert_eq!(result.eigenvalues.len(), 3);
     }
 }
