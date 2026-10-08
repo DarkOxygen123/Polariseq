@@ -109,9 +109,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # "maturin build --sdist" also builds a wheel on the host (40 MB, a glibc tag newer than the others);
+      # "sdist" builds the source package only.
       - uses: PyO3/maturin-action@v1
         with:
-          args: --sdist --out dist
+          command: sdist
+          args: --out dist
+      - name: Only the source package, with every license file it names
+        run: |
+          ls -l dist
+          test "$(ls dist | wc -l)" -eq 1 && ls dist/*.tar.gz
+          # PyPI refuses a package whose metadata names a License-File that is not in the archive.
+          python3 - <<'PY'
+          import glob, re, tarfile
+          t = tarfile.open(glob.glob("dist/*.tar.gz")[0])
+          names = set(t.getnames())
+          root = sorted(names)[0].split("/")[0]
+          info = t.extractfile(f"{root}/PKG-INFO").read().decode()
+          named = re.findall(r"^License-File: (.*)$", info, re.M)
+          missing = [n for n in named if f"{root}/{n}" not in names]
+          print("license files named:", named, "missing:", missing)
+          assert named and not missing, "the source package lacks a license file its metadata names"
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: sdist
