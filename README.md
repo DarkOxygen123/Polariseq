@@ -20,13 +20,15 @@ or should run out of core. The same steps run in both modes.
 - **No system dependencies.** HDF5 is built into the package. macOS, Linux and
   Windows.
 
-| dataset | cells | machine | time | peak memory |
+| dataset | cells | machine | time | peak resident memory |
 |---|---:|---|---:|---:|
 | mouse brain (10x Genomics) | 1.3 million | laptop, 8 GB, 4 threads | 3.3 min | 3.1 GB |
 | human fetal atlas (Cao et al. 2020) | 4.06 million | laptop, 8 GB, 4 threads | 5.3 min | 3.8 GB |
 
 Quality control through clustering, out of core, default settings, 6 GB
-budget. The benchmark scripts and their results are on the
+budget, median of 3 runs. Peak resident memory is the memory the budget
+governs. The macOS physical footprint, which also counts memory the system
+compressed, peaked at 3.9 GB and 6.2 GB. The benchmark scripts and their results are on the
 [`reproduce`](https://github.com/DarkOxygen123/Polariseq/tree/reproduce)
 branch.
 
