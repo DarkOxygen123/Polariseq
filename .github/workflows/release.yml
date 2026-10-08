@@ -10,7 +10,8 @@
 # ("testpypi" or "pypi") registered once as a trusted publisher.
 #
 # HDF5 is compiled from source into the extension (hdf5-metno "static"), so
-# the wheels need no system library.
+# the wheels need no system library. The Linux wheels are manylinux2014 (glibc 2.17), which also
+# installs on the CentOS 7 / RHEL 7 systems that many university clusters still run.
 
 name: Release
 
@@ -41,7 +42,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: linux-x86_64,   os: ubuntu-latest,  target: x86_64-unknown-linux-gnu, manylinux: "2_28" }
+          - { name: linux-x86_64,   os: ubuntu-latest,  target: x86_64-unknown-linux-gnu, manylinux: "2014" }
           - { name: macos-arm64,    os: macos-14,       target: aarch64-apple-darwin,     manylinux: "" }
           - { name: macos-x86_64,   os: macos-15-intel, target: x86_64-apple-darwin,      manylinux: "" }
           - { name: windows-x86_64, os: windows-latest, target: x86_64-pc-windows-msvc,   manylinux: "" }
@@ -69,6 +70,27 @@ jobs:
             (command -v cmake >/dev/null 2>&1 || yum install -y cmake)
             && (command -v perl >/dev/null 2>&1 || yum install -y perl)
 
+      # --find-interpreter also picks up every other Python in the Linux build image (free-threaded 3.14t, the
+      # unreleased 3.15, PyPy), and one extra Linux wheel built on the host. Ship only the five supported Pythons
+      # and one Linux flavor, and stop if the count is not five.
+      - name: Keep the supported wheels only
+        shell: bash
+        run: |
+          cd dist
+          rm_() { if [ "$RUNNER_OS" = Linux ]; then sudo rm -f -- "$@"; else rm -f -- "$@"; fi; }
+          for w in *.whl; do
+            case "$w" in
+              *-cp310-cp310-*|*-cp311-cp311-*|*-cp312-cp312-*|*-cp313-cp313-*|*-cp314-cp314-*) ;;
+              *) echo "removing $w"; rm_ "$w"; continue ;;
+            esac
+            if [ "$RUNNER_OS" = Linux ]; then
+              case "$w" in *manylinux_2_17_x86_64*.whl) ;; *) echo "removing $w"; rm_ "$w" ;; esac
+            fi
+          done
+          ls -l
+          n=$(ls *.whl | wc -l)
+          if [ "$n" -ne 5 ]; then echo "expected 5 wheels, found $n"; exit 1; fi
+
       - name: No shared HDF5 or zlib linked (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -88,9 +110,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # "maturin build --sdist" also builds a wheel on the host (40 MB, a glibc tag newer than the others);
+      # "sdist" builds the source package only.
       - uses: PyO3/maturin-action@v1
         with:
-          args: --sdist --out dist
+          command: sdist
+          args: --out dist
+      - name: Only the source package, with every license file it names
+        run: |
+          ls -l dist
+          test "$(ls dist | wc -l)" -eq 1 && ls dist/*.tar.gz
+          # PyPI refuses a package whose metadata names a License-File that is not in the archive.
+          python3 - <<'PY'
+          import glob, re, tarfile
+          t = tarfile.open(glob.glob("dist/*.tar.gz")[0])
+          names = set(t.getnames())
+          root = sorted(names)[0].split("/")[0]
+          info = t.extractfile(f"{root}/PKG-INFO").read().decode()
+          named = re.findall(r"^License-File: (.*)$", info, re.M)
+          missing = [n for n in named if f"{root}/{n}" not in names]
+          print("license files named:", named, "missing:", missing)
+          assert named and not missing, "the source package lacks a license file its metadata names"
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: sdist
@@ -141,6 +182,7 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+          skip-existing: true   # a failed run may have uploaded some files; TestPyPI never accepts a file name twice
 
   publish-pypi:
     name: publish to PyPI

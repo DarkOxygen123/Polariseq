@@ -1,9 +1,12 @@
 # Running Polariseq on another machine
 
-For a node or server where `pip install polariseq` is not an option: you take
-the code from git, build it in a virtual environment inside the clone, and run
-the examples from there. No root is needed, and nothing goes into the system
-Python. Everything below was run from a fresh clone.
+Most machines need only `pip install polariseq` (see [INSTALL.md](../INSTALL.md)).
+This guide is for a node or server where that does not work: no prebuilt package
+exists for the platform (for example Linux on ARM, Alpine, or a system with an
+old C library), the machine cannot reach PyPI, or you want to build from source.
+You take the code from git, build it in a virtual environment inside the clone,
+and run the examples from there. No root is needed, and nothing goes into the
+system Python. Everything below was run from a fresh clone.
 
 1. [What the machine needs](#1-what-the-machine-needs)
 2. [Get the code](#2-get-the-code)
@@ -33,26 +36,17 @@ dependencies were already compiled.
 
 ## 2. Get the code
 
-The repository is private, so git needs a credential. Any one of these:
+The repository is public, so no account or credential is needed:
 
 ```bash
-# the GitHub command line, once per machine
-gh auth login
-gh repo clone DarkOxygen123/Polariseq-main polariseq
-
-# or HTTPS with a fine-grained token (Contents: read-only on this repository),
-# pasted when git asks for the password, never put in the command
-git clone https://github.com/DarkOxygen123/Polariseq-main.git polariseq
-
-# or SSH, with a deploy key added to the repository
-git clone git@github.com:DarkOxygen123/Polariseq-main.git polariseq
-
+git clone https://github.com/DarkOxygen123/Polariseq.git polariseq
 cd polariseq
 ```
 
-`main` is the library and these examples. The `bench` branch adds the
-benchmark harness (`git clone -b bench ...`); you do not need it to run an
-analysis.
+The `main` branch is the library and these examples. The `reproduce` branch
+adds the benchmark scripts and their results
+(`git clone -b reproduce https://github.com/DarkOxygen123/Polariseq.git polariseq`);
+you do not need it to run an analysis.
 
 ## 3. Set it up
 
@@ -311,13 +305,10 @@ the pipeline returns.
 
 ## 9. On Windows
 
-`setup_node.sh` is for Linux and macOS. On a Windows machine, whether you sit
-at it or reach it by Remote Desktop or SSH, use the PowerShell script that
-ships on the `bench` branch (`bench` is `main` plus the benchmark harness;
-the examples are the same). It has run on a real Windows laptop. It keeps
-uv, Python, Rust and CMake inside the clone and installs only one system
-component, the Visual Studio C++ build tools, which Windows asks permission
-for once (an administrator prompt) and which take about 3 GB.
+`setup_node.sh` is for Linux and macOS. Windows has prebuilt packages for
+Python 3.10 to 3.14 (64-bit), so whether you sit at the machine or reach it by
+Remote Desktop or SSH, you install with pip and need no compiler. Building from
+source on Windows is described in [INSTALL.md](../INSTALL.md).
 
 **Check the machine first** (PowerShell):
 
@@ -327,27 +318,25 @@ for once (an administrator prompt) and which take about 3 GB.
 (Get-PSDrive D).Free / 1GB                                            # free disk on D:, GB
 ```
 
-**Set up** (git must be installed: Git for Windows; sign in once so it can read
-the private repository, for example `gh auth login`, or accept the browser
-prompt Git Credential Manager shows on the first clone):
+**Set up.** Install 64-bit Python 3.10 to 3.14 from python.org and Git for
+Windows, then (PowerShell):
 
 ```powershell
-git clone -b bench https://github.com/DarkOxygen123/Polariseq-main.git D:\polariseq
+python -m venv D:\polariseq-env
+D:\polariseq-env\Scripts\python.exe -m pip install polariseq anndata psutil
+git clone https://github.com/DarkOxygen123/Polariseq.git D:\polariseq
 cd D:\polariseq
-powershell -ExecutionPolicy Bypass -File benchmarks\windows\setup.ps1 -SkipTests
+D:\polariseq-env\Scripts\python.exe examples\01_quickstart.py
 ```
 
-Clone to a short path on the big drive, not into OneDrive: the script refuses
-OneDrive (it would try to upload the data) and warns about long paths (the
-HDF5 build nests folders deeply and can hit Windows' 260-character limit). The
-first build takes 10 to 20 minutes, because HDF5 is compiled; setup finishes
-with a one-minute check. Nothing else needs installing: the virtual environment
-is `.venv\` in the clone.
+Put the environment and the clone on the big drive and not in OneDrive, which
+would try to upload the data. The quickstart runs on a bundled file in seconds,
+so a clean finish means the install works.
 
 **Run** with that environment's Python:
 
 ```powershell
-.\.venv\Scripts\python.exe examples\06_large_run.py D:\data\atlas.h5ad `
+D:\polariseq-env\Scripts\python.exe examples\06_large_run.py D:\data\atlas.h5ad `
     --out D:\runs\atlas --project D:\polariseq-work --ram-gb 48 --threads 16 --umap
 ```
 
@@ -357,7 +346,7 @@ the run detached, with its output in files, and turn sleep off while it runs:
 
 ```powershell
 powercfg /change standby-timeout-ac 0
-Start-Process -FilePath .\.venv\Scripts\python.exe -WindowStyle Hidden `
+Start-Process -FilePath D:\polariseq-env\Scripts\python.exe -WindowStyle Hidden `
     -ArgumentList 'examples\06_large_run.py','D:\data\atlas.h5ad','--out','D:\runs\atlas',
                   '--project','D:\polariseq-work','--ram-gb','48','--threads','16' `
     -RedirectStandardOutput D:\runs\atlas.log -RedirectStandardError D:\runs\atlas.err

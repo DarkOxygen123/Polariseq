@@ -75,6 +75,12 @@ python-source = "python"
 module-name = "polariseq._polariseq"
 features = ["pyo3/extension-module"]
 manifest-path = "crates/polariseq-python/Cargo.toml"
+# The source package is built from the Rust crates and the Python folder; these root files are not part of
+# either, so list them. The metadata names LICENSE, and the upload is refused when the file is missing.
+include = [
+    { path = "LICENSE", format = "sdist" },
+    { path = "THIRD_PARTY_NOTICES.md", format = "sdist" },
+]
 
 [tool.ruff]
 line-length = 100
