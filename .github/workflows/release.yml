@@ -10,7 +10,8 @@
 # ("testpypi" or "pypi") registered once as a trusted publisher.
 #
 # HDF5 is compiled from source into the extension (hdf5-metno "static"), so
-# the wheels need no system library.
+# the wheels need no system library. The Linux wheels are manylinux2014 (glibc 2.17), which also
+# installs on the CentOS 7 / RHEL 7 systems that many university clusters still run.
 
 name: Release
 
@@ -41,7 +42,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: linux-x86_64,   os: ubuntu-latest,  target: x86_64-unknown-linux-gnu, manylinux: "2_28" }
+          - { name: linux-x86_64,   os: ubuntu-latest,  target: x86_64-unknown-linux-gnu, manylinux: "2014" }
           - { name: macos-arm64,    os: macos-14,       target: aarch64-apple-darwin,     manylinux: "" }
           - { name: macos-x86_64,   os: macos-15-intel, target: x86_64-apple-darwin,      manylinux: "" }
           - { name: windows-x86_64, os: windows-latest, target: x86_64-pc-windows-msvc,   manylinux: "" }
@@ -83,7 +84,7 @@ jobs:
               *) echo "removing $w"; rm_ "$w"; continue ;;
             esac
             if [ "$RUNNER_OS" = Linux ]; then
-              case "$w" in *manylinux_2_28_x86_64.whl) ;; *) echo "removing $w"; rm_ "$w" ;; esac
+              case "$w" in *manylinux_2_17_x86_64*.whl) ;; *) echo "removing $w"; rm_ "$w" ;; esac
             fi
           done
           ls -l
