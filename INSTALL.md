@@ -13,7 +13,7 @@ pip install polariseq
 ```
 
 Wheels exist for Python 3.10 to 3.14 on macOS (Apple Silicon and Intel),
-Linux x86_64 (glibc 2.28 or newer, as in most distributions since 2018) and
+Linux x86_64 (glibc 2.17 or newer: CentOS and RHEL 7 and every later distribution) and
 Windows x86_64. On any other platform pip builds Polariseq from
 source (see section 3).
 
@@ -44,7 +44,7 @@ copy it over, and install it from the file:
 ```bash
 # on a machine with internet: the wheel and its dependencies, for Linux x86_64, Python 3.12
 pip download polariseq --dest wheels --only-binary=:all: \
-    --platform manylinux_2_28_x86_64 --python-version 3.12
+    --platform manylinux2014_x86_64 --python-version 3.12
 
 # copy the wheels/ folder to the node, then on the node:
 pip install --no-index --find-links wheels polariseq

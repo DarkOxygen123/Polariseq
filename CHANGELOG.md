@@ -21,5 +21,6 @@ First public release.
   comparison of conditions with donors as replicates.
 - Plots for every step and overview figures drawn from every cell at any size.
 - `ps.set_workflow("scanpy")` for Scanpy's own step definitions.
-- Wheels for macOS (Apple Silicon and Intel), Linux x86_64 and Windows x86_64,
+- Wheels for macOS (Apple Silicon and Intel), Linux x86_64 (manylinux2014:
+  glibc 2.17 or newer, so also CentOS and RHEL 7 clusters) and Windows x86_64,
   Python 3.10 to 3.14.
