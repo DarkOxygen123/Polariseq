@@ -345,7 +345,9 @@ pub fn group_means<'py>(
         let dm: &PyDiskMatrix = &d;
         py.detach(|| dm.current_view(|v| cluster_stats_blocks(v, label, n_groups)))
     } else {
-        return Err(PyTypeError::new_err("group_means reads a SparseMatrix or a DiskMatrix"));
+        return Err(PyTypeError::new_err(
+            "group_means reads a SparseMatrix or a DiskMatrix",
+        ));
     };
     let (g, means) = (stats.n_genes, stats.means());
     // stats are per (gene, group); return groups as rows

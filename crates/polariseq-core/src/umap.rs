@@ -914,7 +914,13 @@ fn ritz_embedding_cols(x: &[f64], y: &[f64], n: usize, q: usize, d: usize) -> Op
 /// simplicial set given as a symmetric CSR, so that it can be inspected or
 /// rescaled before the optimization.
 #[must_use]
-pub fn spectral_layout(indptr: &[u32], indices: &[u32], weights: &[f32], n: usize, seed: u64) -> Vec<f32> {
+pub fn spectral_layout(
+    indptr: &[u32],
+    indices: &[u32],
+    weights: &[f32],
+    n: usize,
+    seed: u64,
+) -> Vec<f32> {
     spectral_init(indptr, indices, weights, n, 2, seed)
 }
 
@@ -933,7 +939,13 @@ pub fn spectral_layout(indptr: &[u32], indices: &[u32], weights: &[f32], n: usiz
 /// Panics if `data` is not `n x d`.
 #[must_use]
 #[allow(clippy::too_many_lines)]
-pub fn kmeans_labels(data: &[f32], n: usize, d: usize, k: usize, seed: u64) -> (Vec<u32>, Vec<f32>) {
+pub fn kmeans_labels(
+    data: &[f32],
+    n: usize,
+    d: usize,
+    k: usize,
+    seed: u64,
+) -> (Vec<u32>, Vec<f32>) {
     const SAMPLE: usize = 100_000;
     const LLOYD: usize = 10;
     assert_eq!(data.len(), n * d, "data must be n x d");
@@ -957,12 +969,16 @@ pub fn kmeans_labels(data: &[f32], n: usize, d: usize, k: usize, seed: u64) -> (
     };
     let m = sample.len();
     let row = |i: usize| &data[i * d..(i + 1) * d];
-    let sq = |a: &[f32], b: &[f32]| -> f32 { a.iter().zip(b).map(|(x, y)| (x - y) * (x - y)).sum() };
+    let sq =
+        |a: &[f32], b: &[f32]| -> f32 { a.iter().zip(b).map(|(x, y)| (x - y) * (x - y)).sum() };
 
     // k-means++ seeding on the sample
     let mut centroids: Vec<f32> = Vec::with_capacity(k * d);
     centroids.extend_from_slice(row(sample[rng.random_range(0..m)]));
-    let mut nearest: Vec<f32> = sample.par_iter().map(|&i| sq(row(i), &centroids[0..d])).collect();
+    let mut nearest: Vec<f32> = sample
+        .par_iter()
+        .map(|&i| sq(row(i), &centroids[0..d]))
+        .collect();
     for c in 1..k {
         let total: f64 = nearest.iter().map(|&v| f64::from(v)).sum();
         let pick = if total > 0.0 {
@@ -982,17 +998,23 @@ pub fn kmeans_labels(data: &[f32], n: usize, d: usize, k: usize, seed: u64) -> (
         };
         centroids.extend_from_slice(row(sample[pick]));
         let new_c = &centroids[c * d..(c + 1) * d];
-        nearest.par_iter_mut().zip(sample.par_iter()).for_each(|(v, &i)| {
-            let dd = sq(row(i), new_c);
-            if dd < *v {
-                *v = dd;
-            }
-        });
+        nearest
+            .par_iter_mut()
+            .zip(sample.par_iter())
+            .for_each(|(v, &i)| {
+                let dd = sq(row(i), new_c);
+                if dd < *v {
+                    *v = dd;
+                }
+            });
     }
 
     // nearest centroid by ||x||^2 - 2 x.c + ||c||^2 (the ||x||^2 term is common)
     let assign = |cells: &[usize], cent: &[f32]| -> Vec<u32> {
-        let cnorm: Vec<f32> = cent.chunks_exact(d).map(|c| c.iter().map(|v| v * v).sum()).collect();
+        let cnorm: Vec<f32> = cent
+            .chunks_exact(d)
+            .map(|c| c.iter().map(|v| v * v).sum())
+            .collect();
         cells
             .par_iter()
             .map(|&i| {
@@ -1052,7 +1074,9 @@ pub fn kmeans_start(data: &[f32], n: usize, d: usize, k: usize, seed: u64) -> Ve
     let mean: Vec<f64> = (0..d)
         .map(|j| (0..k).map(|c| f64::from(centroids[c * d + j])).sum::<f64>() / k as f64)
         .collect();
-    let centred: Vec<f64> = (0..k * d).map(|t| f64::from(centroids[t]) - mean[t % d]).collect();
+    let centred: Vec<f64> = (0..k * d)
+        .map(|t| f64::from(centroids[t]) - mean[t % d])
+        .collect();
     let mut cov = vec![0.0_f64; d * d];
     for c in 0..k {
         let r = &centred[c * d..(c + 1) * d];
@@ -1079,7 +1103,11 @@ pub fn kmeans_start(data: &[f32], n: usize, d: usize, k: usize, seed: u64) -> Ve
             (v.iter().map(|x| (x - mu) * (x - mu)).sum::<f64>() / k as f64).sqrt()
         };
         v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        let loc = if k % 2 == 1 { v[k / 2] } else { 0.5 * (v[k / 2 - 1] + v[k / 2]) };
+        let loc = if k % 2 == 1 {
+            v[k / 2]
+        } else {
+            0.5 * (v[k / 2 - 1] + v[k / 2])
+        };
         let z = 1.281_551_565_544_600_5; // standard normal 0.9 quantile
         for c in 0..k {
             let x = &mut pos[c * 2 + axis];
@@ -1127,7 +1155,10 @@ pub fn multilevel_layout(
     smooth: usize,
 ) -> Vec<f32> {
     assert_eq!(labels.len(), n, "one group per cell");
-    assert!(labels.iter().all(|&g| (g as usize) < k), "groups must be in 0..k");
+    assert!(
+        labels.iter().all(|&g| (g as usize) < k),
+        "groups must be in 0..k"
+    );
     if n == 0 {
         return Vec::new();
     }
@@ -1155,7 +1186,9 @@ pub fn multilevel_layout(
     }
     drop(parts);
     // 2. exact eigenvectors of the group graph's normalized adjacency
-    let dc: Vec<f64> = (0..k).map(|a| wc[a * k..(a + 1) * k].iter().sum::<f64>()).collect();
+    let dc: Vec<f64> = (0..k)
+        .map(|a| wc[a * k..(a + 1) * k].iter().sum::<f64>())
+        .collect();
     let mut sc = vec![0.0_f64; k * k];
     for a in 0..k {
         for b in 0..k {
@@ -1173,32 +1206,54 @@ pub fn multilevel_layout(
             break;
         }
         for a in 0..k {
-            group_pos[a][axis] = if dc[a] > 0.0 { u[(a, col)] / dc[a].sqrt() } else { 0.0 };
+            group_pos[a][axis] = if dc[a] > 0.0 {
+                u[(a, col)] / dc[a].sqrt()
+            } else {
+                0.0
+            };
         }
     }
     // 3. lift to the cells and smooth with (I + S) / 2 on the cell graph
     let deg: Vec<f64> = (0..n)
         .into_par_iter()
-        .map(|i| (indptr[i] as usize..indptr[i + 1] as usize).map(|e| f64::from(weights[e])).sum())
+        .map(|i| {
+            (indptr[i] as usize..indptr[i + 1] as usize)
+                .map(|e| f64::from(weights[e]))
+                .sum()
+        })
         .collect();
     let sq: Vec<f64> = deg.iter().map(|&d| d.max(1e-12).sqrt()).collect();
     let tnorm = sq.iter().map(|v| v * v).sum::<f64>().sqrt();
     let triv: Vec<f64> = sq.iter().map(|v| v / tnorm).collect();
-    let mut x: Vec<[f64; 2]> = (0..n).map(|i| {
-        let g = group_pos[labels[i] as usize];
-        [g[0] * sq[i], g[1] * sq[i]]
-    }).collect();
+    let mut x: Vec<[f64; 2]> = (0..n)
+        .map(|i| {
+            let g = group_pos[labels[i] as usize];
+            [g[0] * sq[i], g[1] * sq[i]]
+        })
+        .collect();
     let orth = |x: &mut Vec<[f64; 2]>| {
         // remove the trivial direction, then Gram-Schmidt the two axes
         for axis in 0..2 {
             let p: f64 = x.par_iter().zip(&triv).map(|(v, t)| v[axis] * t).sum();
-            x.par_iter_mut().zip(&triv).for_each(|(v, t)| v[axis] -= p * t);
+            x.par_iter_mut()
+                .zip(&triv)
+                .for_each(|(v, t)| v[axis] -= p * t);
         }
-        let n0: f64 = x.par_iter().map(|v| v[0] * v[0]).sum::<f64>().sqrt().max(1e-300);
+        let n0: f64 = x
+            .par_iter()
+            .map(|v| v[0] * v[0])
+            .sum::<f64>()
+            .sqrt()
+            .max(1e-300);
         x.par_iter_mut().for_each(|v| v[0] /= n0);
         let p: f64 = x.par_iter().map(|v| v[0] * v[1]).sum();
         x.par_iter_mut().for_each(|v| v[1] -= p * v[0]);
-        let n1: f64 = x.par_iter().map(|v| v[1] * v[1]).sum::<f64>().sqrt().max(1e-300);
+        let n1: f64 = x
+            .par_iter()
+            .map(|v| v[1] * v[1])
+            .sum::<f64>()
+            .sqrt()
+            .max(1e-300);
         x.par_iter_mut().for_each(|v| v[1] /= n1);
     };
     orth(&mut x);
@@ -1222,7 +1277,11 @@ pub fn multilevel_layout(
     // each axis to [-10, 10], as spectral_init scales its output
     let mut out = vec![0.0_f32; n * 2];
     for axis in 0..2 {
-        let (lo, hi) = x.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), v| (l.min(v[axis]), h.max(v[axis])));
+        let (lo, hi) = x
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), v| {
+                (l.min(v[axis]), h.max(v[axis]))
+            });
         let range = (hi - lo).max(1e-12);
         for i in 0..n {
             out[i * 2 + axis] = (((x[i][axis] - lo) / range) * 20.0 - 10.0) as f32;

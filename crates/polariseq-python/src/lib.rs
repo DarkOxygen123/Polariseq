@@ -995,7 +995,9 @@ fn umap_embed<'py>(
         other => return Err(PyValueError::new_err(format!("unknown init {other:?}"))),
     };
     if init == polariseq_core::umap::UmapInit::Given && out.is_none() {
-        return Err(PyValueError::new_err("init='given' needs `out` holding the start"));
+        return Err(PyValueError::new_err(
+            "init='given' needs `out` holding the start",
+        ));
     }
     let opts = polariseq_core::umap::UmapOptions {
         min_dist,
@@ -1132,11 +1134,20 @@ fn umap_multilevel_layout<'py>(
     n_groups: usize,
     smooth: usize,
 ) -> PyResult<Bound<'py, PyArray2<f32>>> {
-    let (ip, ix, dx, lb) = (indptr.as_slice()?, indices.as_slice()?, data.as_slice()?, labels.as_slice()?);
+    let (ip, ix, dx, lb) = (
+        indptr.as_slice()?,
+        indices.as_slice()?,
+        data.as_slice()?,
+        labels.as_slice()?,
+    );
     if lb.len() != n_obs || lb.iter().any(|&g| g as usize >= n_groups) {
-        return Err(PyValueError::new_err("labels must hold one group in 0..n_groups per cell"));
+        return Err(PyValueError::new_err(
+            "labels must hold one group in 0..n_groups per cell",
+        ));
     }
-    let emb = py.detach(|| polariseq_core::umap::multilevel_layout(ip, ix, dx, n_obs, lb, n_groups, smooth));
+    let emb = py.detach(|| {
+        polariseq_core::umap::multilevel_layout(ip, ix, dx, n_obs, lb, n_groups, smooth)
+    });
     flat_to_pyarray2(py, emb, n_obs, 2)
 }
 
