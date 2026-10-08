@@ -150,7 +150,11 @@ impl StoreWriter {
     /// # Panics
     /// Panics if `data`, `indices` and the sum of `lens` disagree.
     pub fn push(&mut self, data: &[f32], indices: &[u32], lens: &[u32]) -> io::Result<()> {
-        assert_eq!(data.len(), indices.len(), "values and gene ids must pair up");
+        assert_eq!(
+            data.len(),
+            indices.len(),
+            "values and gene ids must pair up"
+        );
         assert_eq!(
             lens.iter().map(|&l| l as usize).sum::<usize>(),
             data.len(),
@@ -161,11 +165,21 @@ impl StoreWriter {
             self.indptr.push(self.running);
         }
         match &mut self.sink {
-            Sink::Plain { data: dw, indices: iw } => {
+            Sink::Plain {
+                data: dw,
+                indices: iw,
+            } => {
                 write_le(dw, data.iter().map(|v| v.to_le_bytes()))?;
                 write_le(iw, indices.iter().map(|v| v.to_le_bytes()))?;
             }
-            Sink::Compact { file, offsets, written, data: pd, indices: pi, lens: pl } => {
+            Sink::Compact {
+                file,
+                offsets,
+                written,
+                data: pd,
+                indices: pi,
+                lens: pl,
+            } => {
                 pd.extend_from_slice(data);
                 pi.extend_from_slice(indices);
                 pl.extend_from_slice(lens);
@@ -188,7 +202,14 @@ impl StoreWriter {
                 data.flush()?;
                 indices.flush()?;
             }
-            Sink::Compact { file, offsets, written, data, indices, lens } => {
+            Sink::Compact {
+                file,
+                offsets,
+                written,
+                data,
+                indices,
+                lens,
+            } => {
                 let rows = lens.len();
                 if rows > 0 {
                     flush_chunks(file, offsets, written, data, indices, lens, rows)?;
@@ -209,7 +230,10 @@ impl StoreWriter {
 }
 
 /// Write little-endian values through a bounded buffer.
-fn write_le<W: Write, const N: usize>(w: &mut W, xs: impl Iterator<Item = [u8; N]>) -> io::Result<()> {
+fn write_le<W: Write, const N: usize>(
+    w: &mut W,
+    xs: impl Iterator<Item = [u8; N]>,
+) -> io::Result<()> {
     let mut buf: Vec<u8> = Vec::with_capacity(1 << 18);
     for x in xs {
         buf.extend_from_slice(&x);
@@ -243,9 +267,7 @@ fn flush_chunks(
         .collect();
     let chunks: Vec<Vec<u8>> = bounds
         .par_iter()
-        .map(|&(a, b)| {
-            encode_chunk(&data[off[a]..off[b]], &indices[off[a]..off[b]], &lens[a..b])
-        })
+        .map(|&(a, b)| encode_chunk(&data[off[a]..off[b]], &indices[off[a]..off[b]], &lens[a..b]))
         .collect();
     for c in chunks {
         file.write_all(&c)?;
@@ -266,10 +288,18 @@ fn narrows(v: f32) -> bool {
 }
 
 fn push_plane(out: &mut Vec<u8>, plane: &[u8]) {
-    let mut enc = DeflateEncoder::new(Vec::with_capacity(plane.len() / 3 + 64), Compression::new(LEVEL));
-    enc.write_all(plane).expect("deflate into memory cannot fail");
+    let mut enc = DeflateEncoder::new(
+        Vec::with_capacity(plane.len() / 3 + 64),
+        Compression::new(LEVEL),
+    );
+    enc.write_all(plane)
+        .expect("deflate into memory cannot fail");
     let z = enc.finish().expect("deflate into memory cannot fail");
-    out.extend_from_slice(&u32::try_from(z.len()).expect("a chunk plane is far below 4 GB").to_le_bytes());
+    out.extend_from_slice(
+        &u32::try_from(z.len())
+            .expect("a chunk plane is far below 4 GB")
+            .to_le_bytes(),
+    );
     out.extend_from_slice(&z);
 }
 
@@ -303,7 +333,11 @@ pub fn encode_chunk(data: &[f32], indices: &[u32], lens: &[u32]) -> Vec<u8> {
         ids.clear();
         ids.extend_from_slice(indices);
     }
-    let id_bytes: usize = if ids.iter().all(|&v| u16::try_from(v).is_ok()) { 2 } else { 4 };
+    let id_bytes: usize = if ids.iter().all(|&v| u16::try_from(v).is_ok()) {
+        2
+    } else {
+        4
+    };
     let small = data.iter().all(|&v| narrows(v));
     let value_bytes: usize = if small { 2 } else { 4 };
 
@@ -313,7 +347,11 @@ pub fn encode_chunk(data: &[f32], indices: &[u32], lens: &[u32]) -> Vec<u8> {
     out.push(id_bytes as u8);
     out.push(u8::from(!small));
     out.push(0);
-    out.extend_from_slice(&u32::try_from(nnz).expect("a chunk holds fewer than 2^32 values").to_le_bytes());
+    out.extend_from_slice(
+        &u32::try_from(nnz)
+            .expect("a chunk holds fewer than 2^32 values")
+            .to_le_bytes(),
+    );
     out.extend_from_slice(&[0; 4]); // the checksum, filled in below
     let mut plane: Vec<u8> = Vec::with_capacity(nnz);
     for b in 0..id_bytes {
@@ -347,7 +385,8 @@ fn inflate_plane(buf: &[u8], pos: &mut usize, n: usize, out: &mut Vec<u8>) -> io
     out.clear();
     out.resize(n, 0);
     let mut dec = DeflateDecoder::new(&buf[*pos..*pos + len]);
-    dec.read_exact(out).map_err(|_| bad("compact chunk plane is shorter than its values"))?;
+    dec.read_exact(out)
+        .map_err(|_| bad("compact chunk plane is shorter than its values"))?;
     let mut rest = [0_u8; 1];
     if dec.read(&mut rest)? != 0 {
         return Err(bad("compact chunk plane is longer than its values"));
@@ -374,7 +413,9 @@ pub fn decode_chunk(
     }
     let crc = u32::from_le_bytes([buf[12], buf[13], buf[14], buf[15]]);
     if crc32fast::hash(&buf[HEADER..]) != crc {
-        return Err(bad("compact chunk fails its checksum: the store is damaged"));
+        return Err(bad(
+            "compact chunk fails its checksum: the store is damaged",
+        ));
     }
     let absolute = buf[4] != 0;
     let id_bytes = buf[5] as usize;
@@ -451,7 +492,13 @@ pub fn read_index(prefix: &Path, nrows: usize) -> io::Result<(usize, Vec<u64>)> 
 mod tests {
     use super::*;
 
-    fn rows(seed: u64, n_rows: usize, n_cols: u32, density: f64, floats: bool) -> (Vec<f32>, Vec<u32>, Vec<u32>) {
+    fn rows(
+        seed: u64,
+        n_rows: usize,
+        n_cols: u32,
+        density: f64,
+        floats: bool,
+    ) -> (Vec<f32>, Vec<u32>, Vec<u32>) {
         // A small deterministic generator: rows sorted by gene, counts mostly 1.
         let mut s = seed;
         let mut next = move || {
@@ -467,7 +514,11 @@ mod tests {
                 if (next() % 10_000) as f64 / 10_000.0 < density {
                     ix.push(c);
                     let r = next();
-                    d.push(if floats { (r % 1000) as f32 / 7.0 } else { (1 + (r % 7) * (r % 3)) as f32 });
+                    d.push(if floats {
+                        (r % 1000) as f32 / 7.0
+                    } else {
+                        (1 + (r % 7) * (r % 3)) as f32
+                    });
                     l += 1;
                 }
             }
@@ -531,6 +582,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::many_single_char_names)]
     fn the_writer_produces_a_readable_store_in_both_layouts() {
         let dir = std::env::temp_dir().join(format!("pq_store_{}", std::process::id()));
         let (d, ix, lens) = rows(13, 2500, 3000, 0.03, false);
@@ -541,7 +593,8 @@ mod tests {
             let (mut r, mut v) = (0, 0);
             for piece in [700_usize, 1, 1500, 299] {
                 let n: usize = lens[r..r + piece].iter().map(|&l| l as usize).sum();
-                w.push(&d[v..v + n], &ix[v..v + n], &lens[r..r + piece]).unwrap();
+                w.push(&d[v..v + n], &ix[v..v + n], &lens[r..r + piece])
+                    .unwrap();
                 r += piece;
                 v += n;
             }
@@ -549,7 +602,10 @@ mod tests {
             assert_eq!(Layout::of(&prefix), layout);
             if layout == Layout::Compact {
                 let (cr, offsets) = read_index(&prefix, lens.len()).unwrap();
-                assert_eq!((cr, offsets.len()), (CHUNK_ROWS, 2500_usize.div_ceil(CHUNK_ROWS) + 1));
+                assert_eq!(
+                    (cr, offsets.len()),
+                    (CHUNK_ROWS, 2500_usize.div_ceil(CHUNK_ROWS) + 1)
+                );
             }
         }
         let _ = std::fs::remove_dir_all(&dir);

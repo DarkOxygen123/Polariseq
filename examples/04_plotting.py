@@ -19,7 +19,6 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import polariseq as ps
-
 from _data import load
 
 # ---- settings ------------------------------------------------------------

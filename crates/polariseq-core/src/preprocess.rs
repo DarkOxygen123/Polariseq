@@ -232,7 +232,13 @@ pub fn normalize_total_inplace(m: &mut CsrMatrix, target_sum: f32) -> Vec<f32> {
 ///
 /// # Panics
 /// Panics if `back.len() != nrows`.
-pub fn renormalize_inplace(m: &mut CsrMatrix, back: &[f32], from_log: bool, target_sum: f32, log: bool) {
+pub fn renormalize_inplace(
+    m: &mut CsrMatrix,
+    back: &[f32],
+    from_log: bool,
+    target_sum: f32,
+    log: bool,
+) {
     assert_eq!(back.len(), m.nrows, "one back-scale per row");
     let indptr = &m.indptr;
     let data = &mut m.data;
@@ -246,11 +252,19 @@ pub fn renormalize_inplace(m: &mut CsrMatrix, back: &[f32], from_log: bool, targ
                 let b = f64::from(back[r]);
                 let mut total = 0.0_f64;
                 for v in row.iter_mut() {
-                    let x = if from_log { f64::from(*v).exp_m1() } else { f64::from(*v) } * b;
+                    let x = if from_log {
+                        f64::from(*v).exp_m1()
+                    } else {
+                        f64::from(*v)
+                    } * b;
                     *v = x as f32;
                     total += x;
                 }
-                let s = if total > 0.0 { f64::from(target_sum) / total } else { 0.0 };
+                let s = if total > 0.0 {
+                    f64::from(target_sum) / total
+                } else {
+                    0.0
+                };
                 for v in row.iter_mut() {
                     let y = f64::from(*v) * s;
                     *v = if log { y.ln_1p() as f32 } else { y as f32 };
@@ -922,7 +936,11 @@ pub fn gene_stats_detected_blocks(src: &dyn RowBlocks, expm1: bool) -> (GeneStat
         for i in 0..blk.n_rows {
             let (a, b) = (blk.indptr[i] as usize, blk.indptr[i + 1] as usize);
             for (&col, &v) in blk.indices[a..b].iter().zip(&blk.data[a..b]) {
-                let x = if expm1 { f64::from(v).exp_m1() } else { f64::from(v) };
+                let x = if expm1 {
+                    f64::from(v).exp_m1()
+                } else {
+                    f64::from(v)
+                };
                 let g = col as usize;
                 s[g] += x;
                 q[g] += x * x;
@@ -933,16 +951,32 @@ pub fn gene_stats_detected_blocks(src: &dyn RowBlocks, expm1: bool) -> (GeneStat
         }
         fold.store(off, (s, q, c));
     });
-    let (sums, sq_sums, detected) =
-        fold.finish((vec![0.0_f64; ncols], vec![0.0_f64; ncols], vec![0_u64; ncols]));
+    let (sums, sq_sums, detected) = fold.finish((
+        vec![0.0_f64; ncols],
+        vec![0.0_f64; ncols],
+        vec![0_u64; ncols],
+    ));
     let n = nrows as f64;
     let means: Vec<f64> = sums.iter().map(|&s| s / n).collect();
     let variances: Vec<f64> = sq_sums
         .iter()
         .zip(&means)
-        .map(|(&q, &mean)| if nrows < 2 { 0.0 } else { ((q / n - mean * mean) * n / (n - 1.0)).max(0.0) })
+        .map(|(&q, &mean)| {
+            if nrows < 2 {
+                0.0
+            } else {
+                ((q / n - mean * mean) * n / (n - 1.0)).max(0.0)
+            }
+        })
         .collect();
-    (GeneStats { means, variances, n_obs: nrows }, detected)
+    (
+        GeneStats {
+            means,
+            variances,
+            n_obs: nrows,
+        },
+        detected,
+    )
 }
 
 /// [`hvg_seurat`] among the genes detected in more than `min_cells` cells: the
@@ -1048,13 +1082,22 @@ pub fn hvg_scarf(
         // numpy.histogram edges, then Scarf's widening of the top edge
         let lo = la.iter().copied().fold(f64::INFINITY, f64::min);
         let hi = la.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-        let (lo, hi) = if hi > lo { (lo, hi) } else { (lo - 0.5, hi + 0.5) };
+        let (lo, hi) = if hi > lo {
+            (lo, hi)
+        } else {
+            (lo - 0.5, hi + 0.5)
+        };
         let step = (hi - lo) / n_bins as f64;
         let mut edges: Vec<f64> = (0..=n_bins).map(|k| lo + step * k as f64).collect();
         edges[n_bins] = hi + 0.1;
         let bin_of: Vec<usize> = la
             .iter()
-            .map(|&v| edges.partition_point(|&e| e <= v).saturating_sub(1).min(n_bins - 1))
+            .map(|&v| {
+                edges
+                    .partition_point(|&e| e <= v)
+                    .saturating_sub(1)
+                    .min(n_bins - 1)
+            })
             .collect();
         // the least variable gene of each non-empty bin (first one on ties)
         let mut floor: Vec<Option<usize>> = vec![None; n_bins];
@@ -1076,7 +1119,9 @@ pub fn hvg_scarf(
             corrected[i] = (lb[j] - trend[bin_of[j]]).exp();
         }
     }
-    let mut order: Vec<usize> = (0..g).filter(|&i| detected[i] > min_cells && corrected[i] > 0.0).collect();
+    let mut order: Vec<usize> = (0..g)
+        .filter(|&i| detected[i] > min_cells && corrected[i] > 0.0)
+        .collect();
     order.sort_by(|&a, &b| {
         corrected[b]
             .partial_cmp(&corrected[a])

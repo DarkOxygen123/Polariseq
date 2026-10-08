@@ -433,7 +433,8 @@ impl PyDiskMatrix {
                     FileCsr::open_at(&pfx, self.csr.nrows, n_cols)
                         .map(|f| f.with_max_block_rows(self.block_rows))
                 } else {
-                    self.csr.select_columns(&self.col_keep, &pfx, self.block_rows)
+                    self.csr
+                        .select_columns(&self.col_keep, &pfx, self.block_rows)
                 }
                 .map_err(|e| e.to_string())?;
                 Ok(row_totals_blocks(&sub, None))
@@ -483,8 +484,16 @@ impl PyDiskMatrix {
         if flavor == "scarf" {
             let r = py.detach(|| {
                 self.with_view(&self.csr, true, |v| {
-                    let (stats, det) = polariseq_core::preprocess::gene_stats_detected_blocks(v, expm1);
-                    polariseq_core::preprocess::hvg_scarf(&stats, &det, n_top_genes, n_bins, lowess_frac, min_cells)
+                    let (stats, det) =
+                        polariseq_core::preprocess::gene_stats_detected_blocks(v, expm1);
+                    polariseq_core::preprocess::hvg_scarf(
+                        &stats,
+                        &det,
+                        n_top_genes,
+                        n_bins,
+                        lowess_frac,
+                        min_cells,
+                    )
                 })
             });
             return crate::hvg_scarf_dict(py, r);
@@ -495,8 +504,15 @@ impl PyDiskMatrix {
         if min_cells > 0 {
             let hvg = py.detach(|| {
                 self.with_view(&self.csr, true, |v| {
-                    let (stats, det) = polariseq_core::preprocess::gene_stats_detected_blocks(v, expm1);
-                    polariseq_core::preprocess::hvg_seurat_floor(&stats, &det, n_top_genes, n_bins, min_cells)
+                    let (stats, det) =
+                        polariseq_core::preprocess::gene_stats_detected_blocks(v, expm1);
+                    polariseq_core::preprocess::hvg_seurat_floor(
+                        &stats,
+                        &det,
+                        n_top_genes,
+                        n_bins,
+                        min_cells,
+                    )
                 })
             });
             return crate::hvg_seurat_dict(py, hvg);
@@ -573,12 +589,13 @@ impl PyDiskMatrix {
                             polariseq_core::pca::pca_scaled_blocks_into(v, &opts, max_value, buf)
                         })
                         .map(|s| (None, s)),
-                    (None, false) => self
-                        .with_view(&sub, true, |v| pca_blocks(v, &opts))
-                        .map(|r| {
-                            let (e, s) = r.into_parts();
-                            (Some(e), s)
-                        }),
+                    (None, false) => {
+                        self.with_view(&sub, true, |v| pca_blocks(v, &opts))
+                            .map(|r| {
+                                let (e, s) = r.into_parts();
+                                (Some(e), s)
+                            })
+                    }
                     (None, true) => self
                         .with_view(&sub, true, |v| {
                             polariseq_core::pca::pca_scaled_blocks(v, &opts, max_value)

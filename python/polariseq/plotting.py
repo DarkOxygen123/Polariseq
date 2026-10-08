@@ -1672,7 +1672,7 @@ def scrublet_score_distribution(adata: AnnData, *, log: bool = True, show: bool 
     info = adata.uns.get("scrublet")
     if info is None:
         raise KeyError("run ps.pp.scrublet first")
-    batches = info["batches"] if "batches" in info else {"all": info}
+    batches = info.get("batches", {"all": info})
     key = info.get("batched_by")
     scores = np.asarray(adata.obs["doublet_score"], dtype=float)
     labels = np.asarray(adata.obs[key]).astype(str) if key else None
@@ -1819,7 +1819,7 @@ def dotplot(
         from matplotlib.lines import Line2D
         edge = [ACCENT, ACCENT_2, *categorical_palette(max(1, len(levels)))]
         step = 0.72 / len(levels)
-        for li, lev in enumerate(levels):
+        for li in range(len(levels)):
             xs = np.arange(len(groups)) + (li - (len(levels) - 1) / 2) * step
             for gi in range(len(valid_markers)):
                 k = [j * len(levels) + li for j in range(len(groups))]

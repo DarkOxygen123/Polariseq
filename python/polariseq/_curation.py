@@ -144,8 +144,9 @@ def subcluster(adata: Any, cluster: Any, groupby: str = "leiden", *, resolution:
         seed: Random seed.
         key_added: The column written (default ``f"{groupby}_curated"``; ``groupby`` to replace it).
     """
-    from polariseq._polariseq import leiden_cluster
     from scipy import sparse
+
+    from polariseq._polariseq import leiden_cluster
 
     if "connectivities" not in adata.obsp:
         raise KeyError("subcluster needs obsp['connectivities']; run ps.pp.neighbors first")

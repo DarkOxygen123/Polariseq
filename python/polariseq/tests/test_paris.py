@@ -10,7 +10,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-
 from polariseq._polariseq import (
     dendrogram_cut_balanced,
     dendrogram_cut_straight,

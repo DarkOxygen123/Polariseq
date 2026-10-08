@@ -16,6 +16,7 @@ are removed at the next run.
 
 from __future__ import annotations
 
+import contextlib
 import uuid
 from typing import Any
 
@@ -33,10 +34,8 @@ def new(adata: Any, step: str, key: str, shape: tuple[int, ...], dtype: Any) -> 
     folder = proj.run_dir(name) / "results" / step
     folder.mkdir(parents=True, exist_ok=True)
     for old in folder.glob(f"{key}.*.npy"):
-        try:
+        with contextlib.suppress(OSError):  # still mapped (Windows); removed at a later run
             old.unlink()
-        except OSError:
-            pass  # still mapped (Windows); removed at a later run
     path = folder / f"{key}.{uuid.uuid4().hex[:8]}.npy"
     return np.lib.format.open_memmap(path, mode="w+", dtype=dtype, shape=shape)
 

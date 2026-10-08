@@ -112,8 +112,15 @@ pub struct FileCsr {
 /// Where a store's values and gene ids are: the two plain files, or the
 /// compact chunks and their index (see [`crate::store`]).
 enum Backend {
-    Plain { data: File, indices: File },
-    Compact { file: File, chunk_rows: usize, offsets: Vec<u64> },
+    Plain {
+        data: File,
+        indices: File,
+    },
+    Compact {
+        file: File,
+        chunk_rows: usize,
+        offsets: Vec<u64>,
+    },
 }
 
 /// Default cap on rows per block when no budget says otherwise.
@@ -129,7 +136,11 @@ impl FileCsr {
         let backend = match Layout::of(prefix) {
             Layout::Compact => {
                 let (chunk_rows, offsets) = store::read_index(prefix, nrows)?;
-                Backend::Compact { file: File::open(prefix.with_extension("cz"))?, chunk_rows, offsets }
+                Backend::Compact {
+                    file: File::open(prefix.with_extension("cz"))?,
+                    chunk_rows,
+                    offsets,
+                }
             }
             Layout::Plain => Backend::Plain {
                 data: File::open(prefix.with_extension("data"))?,
@@ -220,7 +231,10 @@ impl FileCsr {
         indices: &mut Vec<u32>,
     ) -> io::Result<()> {
         let (file, chunk_rows, offsets) = match &self.backend {
-            Backend::Plain { data: df, indices: ixf } => {
+            Backend::Plain {
+                data: df,
+                indices: ixf,
+            } => {
                 let (s, e) = (self.indptr[r0] as usize, self.indptr[r1] as usize);
                 let len = (e - s) * 4;
                 bytes.resize(len, 0);
@@ -234,7 +248,11 @@ impl FileCsr {
                 decode_u32(bytes, indices);
                 return Ok(());
             }
-            Backend::Compact { file, chunk_rows, offsets } => (file, *chunk_rows, offsets),
+            Backend::Compact {
+                file,
+                chunk_rows,
+                offsets,
+            } => (file, *chunk_rows, offsets),
         };
         // Compact: decode the chunks the rows fall in. A chunk wholly inside
         // the range is decoded straight into the output; a chunk cut by an end
@@ -251,7 +269,10 @@ impl FileCsr {
             read_exact_at(file, bytes, a)?;
             let (c0, c1) = (c * chunk_rows, ((c + 1) * chunk_rows).min(self.nrows));
             let lens: Vec<u32> = (c0..c1)
-                .map(|r| u32::try_from(self.indptr[r + 1] - self.indptr[r]).expect("a row holds fewer than 2^32 values"))
+                .map(|r| {
+                    u32::try_from(self.indptr[r + 1] - self.indptr[r])
+                        .expect("a row holds fewer than 2^32 values")
+                })
                 .collect();
             if r0 <= c0 && c1 <= r1 {
                 store::decode_chunk(bytes, &lens, data, indices, &mut scratch)?;
@@ -321,7 +342,10 @@ impl FileCsr {
                         out_d.push(v);
                     }
                 }
-                lens.push(u32::try_from(out_d.len() - before).expect("a row holds fewer than 2^32 values"));
+                lens.push(
+                    u32::try_from(out_d.len() - before)
+                        .expect("a row holds fewer than 2^32 values"),
+                );
             }
             writer.push(&out_d, &out_i, &lens)?;
             r0 = r1;
@@ -636,19 +660,49 @@ mod tests {
         let mut sizes = [0_u64; 2];
         for (i, ext) in [["data", "indices"], ["cz", "czi"]].iter().enumerate() {
             for e in ext {
-                sizes[i] += std::fs::metadata(dir.join(format!("{:?}", if i == 0 { Layout::Plain } else { Layout::Compact })).with_extension(e)).unwrap().len();
+                sizes[i] += std::fs::metadata(
+                    dir.join(format!(
+                        "{:?}",
+                        if i == 0 {
+                            Layout::Plain
+                        } else {
+                            Layout::Compact
+                        }
+                    ))
+                    .with_extension(e),
+                )
+                .unwrap()
+                .len();
             }
         }
-        assert!(sizes[1] * 2 < sizes[0], "compact {} vs plain {} bytes", sizes[1], sizes[0]);
-        let ranges = [(0, n_rows), (0, 1), (5, 6), (1000, 1100), (1023, 1025), (CHUNK_ROWS, 2 * CHUNK_ROWS),
-                      (17, 2950), (n_rows - 3, n_rows), (700, 700)];
-        let (mut b, mut d1, mut i1, mut d2, mut i2) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        assert!(
+            sizes[1] * 2 < sizes[0],
+            "compact {} vs plain {} bytes",
+            sizes[1],
+            sizes[0]
+        );
+        let ranges = [
+            (0, n_rows),
+            (0, 1),
+            (5, 6),
+            (1000, 1100),
+            (1023, 1025),
+            (CHUNK_ROWS, 2 * CHUNK_ROWS),
+            (17, 2950),
+            (n_rows - 3, n_rows),
+            (700, 700),
+        ];
+        let (mut b, mut d1, mut i1, mut d2, mut i2) =
+            (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
         for (r0, r1) in ranges {
             plain.read_rows(r0, r1, &mut b, &mut d1, &mut i1).unwrap();
             compact.read_rows(r0, r1, &mut b, &mut d2, &mut i2).unwrap();
             assert_eq!(i1, i2, "gene ids differ for rows {r0}..{r1}");
-            assert_eq!(d1.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
-                       d2.iter().map(|v| v.to_bits()).collect::<Vec<_>>(), "values differ for rows {r0}..{r1}");
+            assert_eq!(
+                d1.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                d2.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                "values differ for rows {r0}..{r1}"
+            );
         }
         // And every kernel built on blocks agrees, at a block size that is not a chunk multiple.
         assert_eq!(

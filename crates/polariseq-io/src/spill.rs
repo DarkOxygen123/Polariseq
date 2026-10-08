@@ -18,9 +18,8 @@ use std::path::{Path, PathBuf};
 
 use polariseq_core::file_matrix::FileCsr;
 use polariseq_core::preprocess::{
-    gene_mean_var_blocks, gene_stats_detected_blocks, hvg_seurat, qc_metrics_blocks, row_totals_blocks,
-    FilteredRows,
-    GeneStats, HvgResult, NormalizedView, QcMetrics,
+    gene_mean_var_blocks, gene_stats_detected_blocks, hvg_seurat, qc_metrics_blocks,
+    row_totals_blocks, FilteredRows, GeneStats, HvgResult, NormalizedView, QcMetrics,
 };
 use polariseq_core::rowblocks::RowBlocks;
 use polariseq_core::store::{Layout, StoreWriter};

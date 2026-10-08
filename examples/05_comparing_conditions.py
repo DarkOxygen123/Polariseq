@@ -76,7 +76,8 @@ def fetch_kang() -> dict[str, str]:
     for name, base in FILES.items():
         if not (DATA / name).exists():
             print(f"downloading {name} ...", flush=True)
-            req = urllib.request.Request(base + name, headers={"User-Agent": "polariseq-example/1.0"})
+            agent = {"User-Agent": "polariseq-example/1.0"}
+            req = urllib.request.Request(base + name, headers=agent)
             with urllib.request.urlopen(req, timeout=300) as r, open(DATA / name, "wb") as fh:
                 fh.write(r.read())
     genes = pd.read_csv(DATA / "GSE96583_batch2.genes.tsv.gz", sep="\t", header=None,
