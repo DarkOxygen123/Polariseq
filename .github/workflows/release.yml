@@ -69,6 +69,27 @@ jobs:
             (command -v cmake >/dev/null 2>&1 || yum install -y cmake)
             && (command -v perl >/dev/null 2>&1 || yum install -y perl)
 
+      # --find-interpreter also picks up every other Python in the Linux build image (free-threaded 3.14t, the
+      # unreleased 3.15, PyPy), and one extra Linux wheel built on the host. Ship only the five supported Pythons
+      # and one Linux flavor, and stop if the count is not five.
+      - name: Keep the supported wheels only
+        shell: bash
+        run: |
+          cd dist
+          rm_() { if [ "$RUNNER_OS" = Linux ]; then sudo rm -f -- "$@"; else rm -f -- "$@"; fi; }
+          for w in *.whl; do
+            case "$w" in
+              *-cp310-cp310-*|*-cp311-cp311-*|*-cp312-cp312-*|*-cp313-cp313-*|*-cp314-cp314-*) ;;
+              *) echo "removing $w"; rm_ "$w"; continue ;;
+            esac
+            if [ "$RUNNER_OS" = Linux ]; then
+              case "$w" in *manylinux_2_28_x86_64.whl) ;; *) echo "removing $w"; rm_ "$w" ;; esac
+            fi
+          done
+          ls -l
+          n=$(ls *.whl | wc -l)
+          if [ "$n" -ne 5 ]; then echo "expected 5 wheels, found $n"; exit 1; fi
+
       - name: No shared HDF5 or zlib linked (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -141,6 +162,7 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+          skip-existing: true   # a failed run may have uploaded some files; TestPyPI never accepts a file name twice
 
   publish-pypi:
     name: publish to PyPI
