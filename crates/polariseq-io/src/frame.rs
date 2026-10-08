@@ -496,7 +496,7 @@ mod tests {
                 uniques: vec!["p".into(), "q".into()]
             }
         );
-        assert!(frame.skipped.is_empty());
+        assert_eq!(frame.skipped, Vec::<(String, String)>::new());
 
         let only = read_frame(&f.group("obs").unwrap(), Some(&["num".to_owned()]), false).unwrap();
         assert_eq!(only.columns.len(), 1);

@@ -1323,6 +1323,6 @@ mod tests {
             doublets > 3.0 * singlets,
             "doublets {doublets} vs singlets {singlets}"
         );
-        assert!(res[0].n_sim == 2 * n);
+        assert_eq!(res[0].n_sim, 2 * n);
     }
 }

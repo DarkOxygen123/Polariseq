@@ -87,11 +87,11 @@ mod tests {
     fn handles_empty_slice() {
         let mut v: Vec<f64> = Vec::new();
         double_in_place(&mut v);
-        assert!(v.is_empty());
+        assert_eq!(v, Vec::<f64>::new());
     }
 
     #[test]
     fn version_is_set() {
-        assert!(!VERSION.is_empty());
+        assert_ne!(VERSION, "");
     }
 }

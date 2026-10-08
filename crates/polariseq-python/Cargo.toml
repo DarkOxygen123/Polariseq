@@ -9,6 +9,11 @@ description.workspace = true
 [lib]
 name = "_polariseq"
 crate-type = ["cdylib"]
+# No Rust tests here (the tests are in Python), and a test binary of an extension module cannot link
+# without the Python interpreter, which `cargo bench --no-run` and `cargo test --all` would try to build.
+test = false
+doctest = false
+bench = false
 
 [dependencies]
 polariseq-core = { workspace = true }
