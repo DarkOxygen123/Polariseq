@@ -1,0 +1,431 @@
+{
+ "reproduction": {
+  "n_cells_after_qc": [
+   2638,
+   2638
+  ],
+  "n_genes_after_filter": [
+   13714,
+   13714
+  ],
+  "n_clusters": [
+   8,
+   8
+  ],
+  "top5_overlap_per_cluster": {
+   "0": 1.0,
+   "1": 0.8,
+   "2": 0.8,
+   "3": 1.0,
+   "4": 1.0,
+   "5": 0.6,
+   "6": 0.8,
+   "7": 0.8
+  },
+  "marker_rule_reproduces_published_names": "8/8"
+ },
+ "polariseq_vs_tutorial": {
+  "n_common_cells": 2638,
+  "cells_only_in_a": 0,
+  "cells_only_in_b": 0,
+  "ari_clusters": 0.619,
+  "nmi_clusters": 0.785,
+  "ari_cell_types": 0.876,
+  "same_cell_type_fraction": 0.9382,
+  "hvg_jaccard": 0.603,
+  "per_type": {
+   "CD4 T": {
+    "cells_a": 1178,
+    "cells_b": 1125,
+    "jaccard_cells": 0.919,
+    "marker_jaccard": 0.304
+   },
+   "CD14+ Monocytes": {
+    "cells_a": 479,
+    "cells_b": 519,
+    "jaccard_cells": 0.901,
+    "marker_jaccard": 0.923
+   },
+   "B": {
+    "cells_a": 343,
+    "cells_b": 341,
+    "jaccard_cells": 0.977,
+    "marker_jaccard": 0.613
+   },
+   "CD8 T": {
+    "cells_a": 284,
+    "cells_b": 336,
+    "jaccard_cells": 0.732,
+    "marker_jaccard": 0.786
+   },
+   "NK": {
+    "cells_a": 152,
+    "cells_b": 152,
+    "jaccard_cells": 0.912,
+    "marker_jaccard": 0.786
+   },
+   "FCGR3A+ Monocytes": {
+    "cells_a": 159,
+    "cells_b": 153,
+    "jaccard_cells": 0.835,
+    "marker_jaccard": 0.724
+   },
+   "Dendritic": {
+    "cells_a": 30,
+    "cells_b": 0,
+    "jaccard_cells": 0.0
+   },
+   "Megakaryocytes": {
+    "cells_a": 13,
+    "cells_b": 12,
+    "jaccard_cells": 0.923,
+    "marker_jaccard": 0.667
+   }
+  },
+  "crosstab": {
+   "B": {
+    "B": 338,
+    "CD14+ Monocytes": 0,
+    "CD4 T": 3,
+    "CD8 T": 0,
+    "Dendritic": 0,
+    "FCGR3A+ Monocytes": 0,
+    "Megakaryocytes": 0,
+    "NK": 0
+   },
+   "CD14+ Monocytes": {
+    "B": 1,
+    "CD14+ Monocytes": 473,
+    "CD4 T": 1,
+    "CD8 T": 0,
+    "Dendritic": 27,
+    "FCGR3A+ Monocytes": 17,
+    "Megakaryocytes": 0,
+    "NK": 0
+   },
+   "CD4 T": {
+    "B": 3,
+    "CD14+ Monocytes": 0,
+    "CD4 T": 1103,
+    "CD8 T": 15,
+    "Dendritic": 3,
+    "FCGR3A+ Monocytes": 0,
+    "Megakaryocytes": 1,
+    "NK": 0
+   },
+   "CD8 T": {
+    "B": 0,
+    "CD14+ Monocytes": 0,
+    "CD4 T": 67,
+    "CD8 T": 262,
+    "Dendritic": 0,
+    "FCGR3A+ Monocytes": 0,
+    "Megakaryocytes": 0,
+    "NK": 7
+   },
+   "FCGR3A+ Monocytes": {
+    "B": 1,
+    "CD14+ Monocytes": 6,
+    "CD4 T": 4,
+    "CD8 T": 0,
+    "Dendritic": 0,
+    "FCGR3A+ Monocytes": 142,
+    "Megakaryocytes": 0,
+    "NK": 0
+   },
+   "Megakaryocytes": {
+    "B": 0,
+    "CD14+ Monocytes": 0,
+    "CD4 T": 0,
+    "CD8 T": 0,
+    "Dendritic": 0,
+    "FCGR3A+ Monocytes": 0,
+    "Megakaryocytes": 12,
+    "NK": 0
+   },
+   "NK": {
+    "B": 0,
+    "CD14+ Monocytes": 0,
+    "CD4 T": 0,
+    "CD8 T": 7,
+    "Dendritic": 0,
+    "FCGR3A+ Monocytes": 0,
+    "Megakaryocytes": 0,
+    "NK": 145
+   }
+  }
+ },
+ "same_steps_vs_tutorial": {
+  "n_common_cells": 2638,
+  "cells_only_in_a": 0,
+  "cells_only_in_b": 0,
+  "ari_clusters": 0.874,
+  "nmi_clusters": 0.863,
+  "ari_cell_types": 0.873,
+  "same_cell_type_fraction": 0.9416,
+  "hvg_jaccard": 0.603,
+  "per_type": {
+   "CD4 T": {
+    "cells_a": 1178,
+    "cells_b": 1090,
+    "jaccard_cells": 0.911,
+    "marker_jaccard": 0.389
+   },
+   "CD14+ Monocytes": {
+    "cells_a": 479,
+    "cells_b": 498,
+    "jaccard_cells": 0.938,
+    "marker_jaccard": 0.923
+   },
+   "B": {
+    "cells_a": 343,
+    "cells_b": 345,
+    "jaccard_cells": 0.977,
+    "marker_jaccard": 0.613
+   },
+   "CD8 T": {
+    "cells_a": 284,
+    "cells_b": 365,
+    "jaccard_cells": 0.708,
+    "marker_jaccard": 0.431
+   },
+   "NK": {
+    "cells_a": 152,
+    "cells_b": 152,
+    "jaccard_cells": 0.912,
+    "marker_jaccard": 0.786
+   },
+   "FCGR3A+ Monocytes": {
+    "cells_a": 159,
+    "cells_b": 152,
+    "jaccard_cells": 0.84,
+    "marker_jaccard": 0.724
+   },
+   "Dendritic": {
+    "cells_a": 30,
+    "cells_b": 24,
+    "jaccard_cells": 0.688,
+    "marker_jaccard": 0.786
+   },
+   "Megakaryocytes": {
+    "cells_a": 13,
+    "cells_b": 12,
+    "jaccard_cells": 0.923,
+    "marker_jaccard": 0.667
+   }
+  },
+  "crosstab": {
+   "B": {
+    "B": 340,
+    "CD14+ Monocytes": 0,
+    "CD4 T": 3,
+    "CD8 T": 0,
+    "Dendritic": 1,
+    "FCGR3A+ Monocytes": 0,
+    "Megakaryocytes": 1,
+    "NK": 0
+   },
+   "CD14+ Monocytes": {
+    "B": 0,
+    "CD14+ Monocytes": 473,
+    "CD4 T": 1,
+    "CD8 T": 0,
+    "Dendritic": 7,
+    "FCGR3A+ Monocytes": 17,
+    "Megakaryocytes": 0,
+    "NK": 0
+   },
+   "CD4 T": {
+    "B": 1,
+    "CD14+ Monocytes": 0,
+    "CD4 T": 1081,
+    "CD8 T": 8,
+    "Dendritic": 0,
+    "FCGR3A+ Monocytes": 0,
+    "Megakaryocytes": 0,
+    "NK": 0
+   },
+   "CD8 T": {
+    "B": 0,
+    "CD14+ Monocytes": 0,
+    "CD4 T": 89,
+    "CD8 T": 269,
+    "Dendritic": 0,
+    "FCGR3A+ Monocytes": 0,
+    "Megakaryocytes": 0,
+    "NK": 7
+   },
+   "Dendritic": {
+    "B": 1,
+    "CD14+ Monocytes": 1,
+    "CD4 T": 0,
+    "CD8 T": 0,
+    "Dendritic": 22,
+    "FCGR3A+ Monocytes": 0,
+    "Megakaryocytes": 0,
+    "NK": 0
+   },
+   "FCGR3A+ Monocytes": {
+    "B": 1,
+    "CD14+ Monocytes": 5,
+    "CD4 T": 4,
+    "CD8 T": 0,
+    "Dendritic": 0,
+    "FCGR3A+ Monocytes": 142,
+    "Megakaryocytes": 0,
+    "NK": 0
+   },
+   "Megakaryocytes": {
+    "B": 0,
+    "CD14+ Monocytes": 0,
+    "CD4 T": 0,
+    "CD8 T": 0,
+    "Dendritic": 0,
+    "FCGR3A+ Monocytes": 0,
+    "Megakaryocytes": 12,
+    "NK": 0
+   },
+   "NK": {
+    "B": 0,
+    "CD14+ Monocytes": 0,
+    "CD4 T": 0,
+    "CD8 T": 7,
+    "Dendritic": 0,
+    "FCGR3A+ Monocytes": 0,
+    "Megakaryocytes": 0,
+    "NK": 145
+   }
+  }
+ },
+ "polariseq_vs_same_steps": {
+  "n_common_cells": 2638,
+  "cells_only_in_a": 0,
+  "cells_only_in_b": 0,
+  "ari_clusters": 0.711,
+  "nmi_clusters": 0.876,
+  "ari_cell_types": 0.952,
+  "same_cell_type_fraction": 0.9773,
+  "hvg_jaccard": 0.997,
+  "per_type": {
+   "CD4 T": {
+    "cells_a": 1090,
+    "cells_b": 1125,
+    "jaccard_cells": 0.967,
+    "marker_jaccard": 0.714
+   },
+   "CD14+ Monocytes": {
+    "cells_a": 498,
+    "cells_b": 519,
+    "jaccard_cells": 0.956,
+    "marker_jaccard": 1.0
+   },
+   "B": {
+    "cells_a": 345,
+    "cells_b": 341,
+    "jaccard_cells": 0.988,
+    "marker_jaccard": 1.0
+   },
+   "CD8 T": {
+    "cells_a": 365,
+    "cells_b": 336,
+    "jaccard_cells": 0.915,
+    "marker_jaccard": 0.521
+   },
+   "NK": {
+    "cells_a": 152,
+    "cells_b": 152,
+    "jaccard_cells": 1.0,
+    "marker_jaccard": 1.0
+   },
+   "FCGR3A+ Monocytes": {
+    "cells_a": 152,
+    "cells_b": 153,
+    "jaccard_cells": 0.993,
+    "marker_jaccard": 1.0
+   },
+   "Dendritic": {
+    "cells_a": 24,
+    "cells_b": 0,
+    "jaccard_cells": 0.0
+   },
+   "Megakaryocytes": {
+    "cells_a": 12,
+    "cells_b": 12,
+    "jaccard_cells": 1.0,
+    "marker_jaccard": 1.0
+   }
+  },
+  "crosstab": {
+   "B": {
+    "B": 341,
+    "CD14+ Monocytes": 0,
+    "CD4 T": 0,
+    "CD8 T": 0,
+    "Dendritic": 0,
+    "FCGR3A+ Monocytes": 0,
+    "Megakaryocytes": 0,
+    "NK": 0
+   },
+   "CD14+ Monocytes": {
+    "B": 0,
+    "CD14+ Monocytes": 497,
+    "CD4 T": 0,
+    "CD8 T": 0,
+    "Dendritic": 22,
+    "FCGR3A+ Monocytes": 0,
+    "Megakaryocytes": 0,
+    "NK": 0
+   },
+   "CD4 T": {
+    "B": 4,
+    "CD14+ Monocytes": 0,
+    "CD4 T": 1089,
+    "CD8 T": 30,
+    "Dendritic": 2,
+    "FCGR3A+ Monocytes": 0,
+    "Megakaryocytes": 0,
+    "NK": 0
+   },
+   "CD8 T": {
+    "B": 0,
+    "CD14+ Monocytes": 0,
+    "CD4 T": 1,
+    "CD8 T": 335,
+    "Dendritic": 0,
+    "FCGR3A+ Monocytes": 0,
+    "Megakaryocytes": 0,
+    "NK": 0
+   },
+   "FCGR3A+ Monocytes": {
+    "B": 0,
+    "CD14+ Monocytes": 1,
+    "CD4 T": 0,
+    "CD8 T": 0,
+    "Dendritic": 0,
+    "FCGR3A+ Monocytes": 152,
+    "Megakaryocytes": 0,
+    "NK": 0
+   },
+   "Megakaryocytes": {
+    "B": 0,
+    "CD14+ Monocytes": 0,
+    "CD4 T": 0,
+    "CD8 T": 0,
+    "Dendritic": 0,
+    "FCGR3A+ Monocytes": 0,
+    "Megakaryocytes": 12,
+    "NK": 0
+   },
+   "NK": {
+    "B": 0,
+    "CD14+ Monocytes": 0,
+    "CD4 T": 0,
+    "CD8 T": 0,
+    "Dendritic": 0,
+    "FCGR3A+ Monocytes": 0,
+    "Megakaryocytes": 0,
+    "NK": 152
+   }
+  }
+ }
+}

@@ -1,0 +1,24 @@
+[package]
+name = "polariseq-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description.workspace = true
+
+[dependencies]
+rayon = { workspace = true }
+flate2 = { workspace = true }
+crc32fast = "1"
+faer = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+memmap2 = { workspace = true }
+thiserror = "1.0"
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "core_smoke"
+harness = false

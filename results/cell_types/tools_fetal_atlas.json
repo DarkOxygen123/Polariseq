@@ -1,0 +1,109 @@
+{
+ "cells_csv": "<run folder>/bench/benchmarks/results/fetal_data/fetal_cells.csv.gz",
+ "profiles": "<run folder>/sweep/fetal4m_ooc/reference_profiles.npy",
+ "types": 77,
+ "tools": {
+  "Polariseq": {
+   "source": "<run folder>/bench/results_cmp_r4/fetal4062k_polariseq-spill_t4/artifacts/fetal4062k__polariseq-spill__rep1__20261005T083504",
+   "cells": 4000604,
+   "cells_with_type": 4000604,
+   "clusters_vs_types": {
+    "clusters": 43,
+    "ari": 0.4277,
+    "nmi": 0.7991,
+    "purity": 0.9278,
+    "types_recovered": 20
+   },
+   "layout": {
+    "islands": 1,
+    "type_share_in_largest_island_median": 1.0,
+    "types_mostly_in_one_island": 77,
+    "types": 77,
+    "grid": 500,
+    "pixel_label_purity": 0.9463,
+    "global_spearman_vs_type_profiles": 0.5754
+   },
+   "genes": 2000
+  },
+  "Polariseq_in_memory": {
+   "source": "<run folder>/bench/results_cmp_r4/fetal4062k_polariseq-ram_t8/artifacts/fetal4062k__polariseq-ram__rep1__20261005T083529",
+   "cells": 4000604,
+   "cells_with_type": 4000604,
+   "clusters_vs_types": {
+    "clusters": 42,
+    "ari": 0.4044,
+    "nmi": 0.793,
+    "purity": 0.9163,
+    "types_recovered": 19
+   },
+   "layout": {
+    "islands": 1,
+    "type_share_in_largest_island_median": 1.0,
+    "types_mostly_in_one_island": 77,
+    "types": 77,
+    "grid": 500,
+    "pixel_label_purity": 0.9476,
+    "global_spearman_vs_type_profiles": 0.5883
+   },
+   "genes": 2000
+  },
+  "Scanpy": {
+   "source": "<run folder>/bench/embeddings/fetal4062k__scanpy-tuned-int64__20261004T130538.npz",
+   "cells": 4000604,
+   "cells_with_type": 4000604,
+   "clusters_vs_types": {
+    "clusters": 89,
+    "ari": 0.2533,
+    "nmi": 0.6268,
+    "purity": 0.8404,
+    "types_recovered": 15
+   },
+   "layout": {
+    "islands": 7,
+    "type_share_in_largest_island_median": 1.0,
+    "types_mostly_in_one_island": 76,
+    "types": 77,
+    "grid": 500,
+    "pixel_label_purity": 0.8581,
+    "global_spearman_vs_type_profiles": 0.6638
+   },
+   "genes": 2000
+  },
+  "Scarf": {
+   "source": "<run folder>/bench/embeddings/fetal4062k__scarf__20261004T125231.npz",
+   "cells": 4000604,
+   "cells_with_type": 4000604,
+   "clusters_vs_types": {
+    "clusters": 39,
+    "ari": 0.4179,
+    "nmi": 0.8024,
+    "purity": 0.9287,
+    "types_recovered": 20
+   },
+   "layout": {
+    "islands": 1,
+    "type_share_in_largest_island_median": 1.0,
+    "types_mostly_in_one_island": 77,
+    "types": 77,
+    "grid": 500,
+    "pixel_label_purity": 0.9489,
+    "global_spearman_vs_type_profiles": 0.5711
+   },
+   "genes": 2000
+  },
+  "authors": {
+   "source": "Cao et al. 2020, Global_umap_1/2",
+   "cells": 4000604,
+   "cells_with_type": 4000604,
+   "layout": {
+    "islands": 6,
+    "type_share_in_largest_island_median": 0.999,
+    "types_mostly_in_one_island": 75,
+    "types": 77,
+    "grid": 500,
+    "pixel_label_purity": 0.9681,
+    "global_spearman_vs_type_profiles": 0.4427
+   }
+  }
+ }
+}

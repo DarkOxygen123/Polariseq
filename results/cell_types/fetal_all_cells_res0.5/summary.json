@@ -1,0 +1,26 @@
+{
+ "path": "benchmarks/results/fetal_data/fetal4062k.h5ad",
+ "params": {
+  "n_hvg": 2000,
+  "n_pcs": 50,
+  "n_neighbors": 15,
+  "target_sum": 10000.0,
+  "resolution": 0.5,
+  "seed": 0,
+  "min_genes": 200
+ },
+ "budget_gb": 6.0,
+ "threads": 4,
+ "polariseq": "0.1.0b1",
+ "threads_used": 4,
+ "started": "2026-10-08T00:37:27",
+ "n_cells_file": 4062980,
+ "n_cells_kept": 4000604,
+ "n_clusters": 32,
+ "leiden_quality": 0.9512891098203226,
+ "timing_s": {
+  "pipeline": 627.5,
+  "umap": 300.7,
+  "streaming_stats": 265.5
+ }
+}

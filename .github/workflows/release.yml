@@ -1,0 +1,174 @@
+# Builds the wheels and the source package, tests each wheel in a clean
+# environment, and publishes them.
+#
+#   Actions > Release > Run workflow > target: testpypi   publishes to TestPyPI
+#   git tag v0.1.0 && git push origin v0.1.0               publishes to PyPI and
+#                                                          makes a GitHub release
+#
+# Publishing uses PyPI's trusted publishing: no token is stored. Each index
+# needs this repository, the workflow file "release.yml" and the environment
+# ("testpypi" or "pypi") registered once as a trusted publisher.
+#
+# HDF5 is compiled from source into the extension (hdf5-metno "static"), so
+# the wheels need no system library.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Where to publish"
+        type: choice
+        options: [testpypi, none]
+        default: testpypi
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: ""      # never bake the build machine's CPU features into a wheel
+  RUST_BACKTRACE: 1
+
+jobs:
+  wheels:
+    name: wheels (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x86_64,   os: ubuntu-latest,  target: x86_64-unknown-linux-gnu, manylinux: "2_28" }
+          - { name: macos-arm64,    os: macos-14,       target: aarch64-apple-darwin,     manylinux: "" }
+          - { name: macos-x86_64,   os: macos-15-intel, target: x86_64-apple-darwin,      manylinux: "" }
+          - { name: windows-x86_64, os: windows-latest, target: x86_64-pc-windows-msvc,   manylinux: "" }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python interpreters (macOS and Windows)
+        if: runner.os != 'Linux'
+        uses: actions/setup-python@v5
+        with:
+          python-version: |
+            3.10
+            3.11
+            3.12
+            3.13
+            3.14
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          args: --release --find-interpreter --strip --out dist
+          before-script-linux: >
+            (command -v cmake >/dev/null 2>&1 || yum install -y cmake)
+            && (command -v perl >/dev/null 2>&1 || yum install -y perl)
+
+      - name: No shared HDF5 or zlib linked (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p /tmp/whl && cd /tmp/whl
+          for w in "$GITHUB_WORKSPACE"/dist/*.whl; do python3 -m zipfile -e "$w" x/; done
+          BAD=$(find x -name "_polariseq*.so" -exec readelf -d {} \; | grep NEEDED | grep -E "libhdf5|libz\.|libcurl" || true)
+          if [ -n "$BAD" ]; then echo "$BAD"; exit 1; fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.name }}
+          path: dist/
+          if-no-files-found: error
+
+  sdist:
+    name: source package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: PyO3/maturin-action@v1
+        with:
+          args: --sdist --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/
+          if-no-files-found: error
+
+  test-wheels:
+    name: test (${{ matrix.os }}, Python ${{ matrix.python }})
+    needs: wheels
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, macos-15-intel, windows-latest]
+        python: ["3.10", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+      - name: Install the wheel into a clean environment and run the quickstart
+        shell: bash
+        run: |
+          python -m venv /tmp/venv
+          if [ -f /tmp/venv/Scripts/python.exe ]; then PY=/tmp/venv/Scripts/python.exe; else PY=/tmp/venv/bin/python; fi
+          "$PY" -m pip install --upgrade pip
+          "$PY" -m pip install polariseq --find-links dist --only-binary=polariseq
+          cd examples && "$PY" 01_quickstart.py
+
+  publish-testpypi:
+    name: publish to TestPyPI
+    needs: [wheels, sdist, test-wheels]
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi'
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
+    name: publish to PyPI
+    needs: [wheels, sdist, test-wheels]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: GitHub release
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

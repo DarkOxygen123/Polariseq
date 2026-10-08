@@ -1,0 +1,53 @@
+dataset,measure,a,b,value
+brain1306k,cells_kept,Polariseq out-of-core,,1292537.0
+brain1306k,clusters,Polariseq out-of-core,,37.0
+brain1306k,genes_selected,Polariseq out-of-core,,2000.0
+brain1306k,cells_kept,Polariseq in-memory,,1292537.0
+brain1306k,clusters,Polariseq in-memory,,35.0
+brain1306k,genes_selected,Polariseq in-memory,,2000.0
+brain1306k,cells_kept,Scanpy,,1292537.0
+brain1306k,clusters,Scanpy,,28.0
+brain1306k,genes_selected,Scanpy,,2000.0
+brain1306k,cells_kept,Scarf,,1292537.0
+brain1306k,clusters,Scarf,,32.0
+brain1306k,genes_selected,Scarf,,2000.0
+brain1306k,"selected genes, Jaccard",Polariseq out-of-core,Polariseq in-memory,1.0
+brain1306k,"selected genes, Jaccard",Polariseq out-of-core,Scanpy,0.2961762799740765
+brain1306k,"selected genes, Jaccard",Polariseq out-of-core,Scarf,0.7391304347826086
+brain1306k,"selected genes, Jaccard",Polariseq in-memory,Scanpy,0.2961762799740765
+brain1306k,"selected genes, Jaccard",Polariseq in-memory,Scarf,0.7391304347826086
+brain1306k,"selected genes, Jaccard",Scanpy,Scarf,0.2936610608020699
+brain1306k,"clusters, adjusted Rand index",Polariseq out-of-core,Polariseq in-memory,0.7250510065745228
+brain1306k,"clusters, adjusted Rand index",Polariseq out-of-core,Scanpy,0.49179795666681514
+brain1306k,"clusters, adjusted Rand index",Polariseq out-of-core,Scarf,0.5218261106859898
+brain1306k,"clusters, adjusted Rand index",Polariseq in-memory,Scanpy,0.49671653557082984
+brain1306k,"clusters, adjusted Rand index",Polariseq in-memory,Scarf,0.520845016296663
+brain1306k,"clusters, adjusted Rand index",Scanpy,Scarf,0.582503620822397
+brain1306k,"principal components, largest angle (deg)",Polariseq out-of-core,Polariseq in-memory,5.267167592703517e-05
+brain1306k,"principal components, median angle (deg)",Polariseq out-of-core,Polariseq in-memory,1.190479122564128e-05
+fetal4062k,cells_kept,Polariseq out-of-core,,4000604.0
+fetal4062k,clusters,Polariseq out-of-core,,43.0
+fetal4062k,genes_selected,Polariseq out-of-core,,2000.0
+fetal4062k,cells_kept,Polariseq in-memory,,4000604.0
+fetal4062k,clusters,Polariseq in-memory,,42.0
+fetal4062k,genes_selected,Polariseq in-memory,,2000.0
+fetal4062k,cells_kept,Scanpy,,4000604.0
+fetal4062k,clusters,Scanpy,,89.0
+fetal4062k,genes_selected,Scanpy,,2000.0
+fetal4062k,cells_kept,Scarf,,4000604.0
+fetal4062k,clusters,Scarf,,39.0
+fetal4062k,genes_selected,Scarf,,2000.0
+fetal4062k,"selected genes, Jaccard",Polariseq out-of-core,Polariseq in-memory,1.0
+fetal4062k,"selected genes, Jaccard",Polariseq out-of-core,Scanpy,0.13058224985867722
+fetal4062k,"selected genes, Jaccard",Polariseq out-of-core,Scarf,0.6835016835016835
+fetal4062k,"selected genes, Jaccard",Polariseq in-memory,Scanpy,0.13058224985867722
+fetal4062k,"selected genes, Jaccard",Polariseq in-memory,Scarf,0.6835016835016835
+fetal4062k,"selected genes, Jaccard",Scanpy,Scarf,0.12994350282485875
+fetal4062k,"clusters, adjusted Rand index",Polariseq out-of-core,Polariseq in-memory,0.8529118842256972
+fetal4062k,"clusters, adjusted Rand index",Polariseq out-of-core,Scanpy,0.45507276338372155
+fetal4062k,"clusters, adjusted Rand index",Polariseq out-of-core,Scarf,0.782633013356797
+fetal4062k,"clusters, adjusted Rand index",Polariseq in-memory,Scanpy,0.4682037873918728
+fetal4062k,"clusters, adjusted Rand index",Polariseq in-memory,Scarf,0.7381212384937438
+fetal4062k,"clusters, adjusted Rand index",Scanpy,Scarf,0.4743758266394846
+fetal4062k,"principal components, largest angle (deg)",Polariseq out-of-core,Polariseq in-memory,6.830189170012755e-06
+fetal4062k,"principal components, median angle (deg)",Polariseq out-of-core,Polariseq in-memory,5.193302344775284e-06

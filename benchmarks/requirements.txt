@@ -1,0 +1,30 @@
+# Python dependencies of the telemetry harness and comparison arms.
+#
+# Pinned to the versions of the macOS campaign (Python 3.14.6), so a
+# cross-platform difference is the platform's and not a different scanpy.
+# Every pin has a published wheel for macOS arm64, Linux x86_64 and Windows
+# x86_64 on Python 3.12-3.14 (checked 2026-09-18), so no platform builds
+# these from source. Versions are also recorded per run in each record's
+# env.versions by telemetry/record.py.
+#
+# The polariseq package itself is installed into the same environment with
+#   pip install polariseq
+# or, from a source checkout, maturin develop --release.
+
+scanpy==1.12.3
+anndata==0.13.2
+numpy==2.4.6
+scipy==1.18.0
+pandas==3.0.5
+numba==0.66.0
+llvmlite==0.48.0
+igraph==1.0.0
+leidenalg==0.12.0
+umap-learn==0.5.12
+pynndescent==0.6.0
+psutil==7.2.2
+h5py==3.16.0
+scikit-learn==1.9.0
+matplotlib==3.11.1
+maturin==1.14.1
+pytest==9.1.1

@@ -1,0 +1,178 @@
+{
+ "graph": "<run folder>/exp/umap_cause_4m",
+ "cells": 4000604,
+ "edges": 92583980,
+ "measure": "benchmarks/r4_spectral.py (shift undone along the trivial eigenvector only)",
+ "eigsh_tol1e-4": {
+  "seconds": 352.4,
+  "eigenvalues": [
+   0.999999999298099,
+   0.9995213130787621,
+   0.999345965259134,
+   0.9992706762057706
+  ],
+  "angle_to_reference": 0.574,
+  "energy_ratio": 1.0001
+ },
+ "eigsh_tol1e-8": {
+  "seconds": 814.8,
+  "eigenvalues": [
+   0.9999999992980991,
+   0.9995213208094896,
+   0.9993460173001562,
+   0.999271272891242
+  ]
+ },
+ "gap_ratio": 0.11429111034900873,
+ "spectral_current": {
+  "seconds": 184.7,
+  "angle": 88.429,
+  "energy_ratio": 16.765
+ },
+ "multilevel": {
+  "kmeans250": {
+   "groups": 250,
+   "grouping_seconds": 7.5,
+   "by_steps": [
+    {
+     "smoothing_steps": 0,
+     "seconds": 0.41,
+     "angle": 8.235,
+     "energy_ratio": 6.6136
+    },
+    {
+     "smoothing_steps": 10,
+     "seconds": 2.29,
+     "angle": 7.556,
+     "energy_ratio": 1.1389
+    },
+    {
+     "smoothing_steps": 30,
+     "seconds": 6.15,
+     "angle": 7.458,
+     "energy_ratio": 1.0265
+    },
+    {
+     "smoothing_steps": 100,
+     "seconds": 19.88,
+     "angle": 7.324,
+     "energy_ratio": 1.0063
+    },
+    {
+     "smoothing_steps": 300,
+     "seconds": 59.69,
+     "angle": 7.106,
+     "energy_ratio": 1.0037
+    }
+   ]
+  },
+  "kmeans1000": {
+   "groups": 1000,
+   "grouping_seconds": 29.3,
+   "by_steps": [
+    {
+     "smoothing_steps": 0,
+     "seconds": 0.56,
+     "angle": 6.635,
+     "energy_ratio": 4.5776
+    },
+    {
+     "smoothing_steps": 10,
+     "seconds": 2.6,
+     "angle": 5.855,
+     "energy_ratio": 1.062
+    },
+    {
+     "smoothing_steps": 30,
+     "seconds": 6.62,
+     "angle": 5.782,
+     "energy_ratio": 1.0175
+    },
+    {
+     "smoothing_steps": 100,
+     "seconds": 20.53,
+     "angle": 5.676,
+     "energy_ratio": 1.0045
+    },
+    {
+     "smoothing_steps": 300,
+     "seconds": 60.49,
+     "angle": 5.511,
+     "energy_ratio": 1.002
+    }
+   ]
+  },
+  "kmeans4000": {
+   "groups": 4000,
+   "grouping_seconds": 116.0,
+   "by_steps": [
+    {
+     "smoothing_steps": 0,
+     "seconds": 5.69,
+     "angle": 6.287,
+     "energy_ratio": 3.9606
+    },
+    {
+     "smoothing_steps": 10,
+     "seconds": 8.31,
+     "angle": 5.561,
+     "energy_ratio": 1.0291
+    },
+    {
+     "smoothing_steps": 30,
+     "seconds": 12.28,
+     "angle": 5.499,
+     "energy_ratio": 1.0076
+    },
+    {
+     "smoothing_steps": 100,
+     "seconds": 25.88,
+     "angle": 5.41,
+     "energy_ratio": 1.0029
+    },
+    {
+     "smoothing_steps": 300,
+     "seconds": 64.33,
+     "angle": 5.273,
+     "energy_ratio": 1.0016
+    }
+   ]
+  },
+  "leiden": {
+   "groups": 81,
+   "grouping_seconds": 0.0,
+   "by_steps": [
+    {
+     "smoothing_steps": 0,
+     "seconds": 0.24,
+     "angle": 8.861,
+     "energy_ratio": 3.1669
+    },
+    {
+     "smoothing_steps": 10,
+     "seconds": 2.22,
+     "angle": 8.324,
+     "energy_ratio": 1.2375
+    },
+    {
+     "smoothing_steps": 30,
+     "seconds": 6.13,
+     "angle": 8.014,
+     "energy_ratio": 1.0955
+    },
+    {
+     "smoothing_steps": 100,
+     "seconds": 19.68,
+     "angle": 7.61,
+     "energy_ratio": 1.0194
+    },
+    {
+     "smoothing_steps": 300,
+     "seconds": 58.62,
+     "angle": 7.259,
+     "energy_ratio": 1.0047
+    }
+   ]
+  }
+ }
+}

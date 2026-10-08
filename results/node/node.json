@@ -1,0 +1,15 @@
+{
+ "processor": "2 x Intel Xeon Platinum 8268 (Cascade Lake), 24 cores each, 1 thread per core, 2.9 GHz maximum",
+ "cores": 48,
+ "numa_nodes": 2,
+ "instruction_sets": "AVX2, AVX-512 (F, BW, VL), FMA",
+ "cache": "L1d 32 KB, L1i 32 KB, L2 1 MB per core; L3 35.75 MB per socket",
+ "memory_bytes": 201464778752,
+ "memory_note": "187 GB schedulable per node, shared by the jobs on it",
+ "operating_system": "CentOS Linux 7, kernel 3.10.0-1160, glibc 2.17",
+ "scheduler": "Slurm 20.11.8",
+ "parallel_file_system": "Lustre (about 858 TB), holds the input, the block store and Scarf's Zarr store",
+ "local_disk": "447 GB SATA SSD (not used for data)",
+ "partition": "110 identical nodes",
+ "python": "3.12"
+}

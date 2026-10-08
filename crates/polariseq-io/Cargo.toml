@@ -1,0 +1,18 @@
+[package]
+name = "polariseq-io"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description.workspace = true
+
+[dependencies]
+polariseq-core = { workspace = true }
+thiserror = "1.0"
+hdf5-metno = { version = "0.14", features = ["static", "zlib"] }
+polariseq-hdf5-raw = { path = "../polariseq-hdf5-raw" }
+flate2 = "1.0"
+faer = { workspace = true }
+rayon = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }

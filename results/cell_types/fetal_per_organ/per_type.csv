@@ -1,0 +1,78 @@
+,cells,best_cluster,recall,purity,recovered,clusters_of_this_type,recall_split,purity_split,recovered_split
+Excitatory neurons,1248672,50,0.138,0.999,False,14,0.992,0.995,True
+Inhibitory neurons,346984,58,0.297,0.98,False,9,0.983,0.971,True
+Astrocytes,317234,23,0.457,0.999,False,6,0.993,0.996,True
+Adrenocortical cells,315023,0,0.163,0.996,False,17,0.999,0.998,True
+Granule neurons,311288,24,0.389,0.989,False,7,0.994,0.988,True
+Purkinje neurons,279742,25,0.401,1.0,False,7,0.998,0.995,True
+Stromal cells,146632,204,0.25,1.0,False,31,0.996,0.996,True
+Inhibitory interneurons,129263,29,0.415,0.991,False,4,0.979,0.994,True
+Bronchiolar and alveolar epithelial cells,100526,205,0.272,0.995,False,9,0.999,0.997,True
+Metanephric cells,90790,156,0.227,0.998,False,13,0.995,0.994,True
+Vascular endothelial cells,74284,9,0.213,0.99,False,17,0.996,0.991,True
+Cardiomyocytes,64698,106,0.248,0.999,False,12,1.0,0.995,True
+Unipolar brush cells,52343,30,0.961,0.967,True,1,0.961,0.967,True
+Hepatoblasts,47798,179,0.311,1.0,False,12,0.999,0.998,True
+Limbic system neurons,45920,65,0.979,0.987,True,1,0.979,0.987,True
+Mesangial cells,43975,157,0.466,0.997,False,4,0.996,0.995,True
+Erythroblasts,42666,178,0.358,0.983,False,12,0.952,0.991,True
+Oligodendrocytes,33476,72,0.512,0.986,True,2,0.988,0.991,True
+Intestinal epithelial cells,24498,127,0.282,0.998,False,11,0.997,0.998,True
+Chromaffin cells,20969,7,0.969,0.996,True,2,0.997,0.994,True
+SLC24A4_PEX5L positive cells,19695,39,0.994,0.994,True,1,0.994,0.994,True
+Myeloid cells,18071,171,0.187,0.838,False,11,0.891,0.721,True
+Lymphoid cells,16641,249,0.248,0.997,False,10,0.718,0.874,True
+SKOR2_NPSR1 positive cells,14963,73,0.997,0.997,True,1,0.997,0.997,True
+Retinal progenitors and Muller glia,14824,79,0.571,0.969,True,4,0.984,0.979,True
+Syncytiotrophoblasts and villous cytotrophoblasts,14499,276,0.491,0.999,False,7,0.986,0.993,True
+Photoreceptor cells,12315,80,0.403,0.998,False,5,0.974,0.981,True
+Skeletal muscle cells,12128,228,0.452,0.995,False,8,0.98,0.984,True
+Acinar cells,10779,246,0.595,1.0,True,7,0.999,0.969,True
+Ganglion cells,10128,82,0.393,0.999,False,5,0.999,0.995,True
+Ureteric bud cells,9128,167,0.684,0.961,True,2,0.976,0.971,True
+Microglia,8944,77,0.495,0.994,False,2,0.987,0.995,True
+Thymocytes,7791,332,0.274,0.993,False,8,0.996,0.994,True
+Endocardial cells,7348,109,0.999,0.998,True,1,0.999,0.998,True
+Amacrine cells,7239,86,0.35,1.0,False,4,0.997,0.998,True
+Smooth muscle cells,7208,252,0.306,0.982,False,6,0.966,0.986,True
+Lymphatic endothelial cells,7203,215,0.739,0.998,True,5,0.978,0.997,True
+Satellite cells,5186,232,0.475,0.915,False,3,0.989,0.954,True
+Ductal cells,4770,248,0.93,0.996,True,1,0.93,0.996,True
+Islet endocrine cells,4709,253,0.471,0.999,False,4,0.996,0.999,True
+STC2_TLX1 positive cells,4337,296,0.914,0.961,True,3,0.953,0.958,True
+Sympathoblasts,3755,20,0.98,0.992,True,1,0.98,0.992,True
+Goblet cells,3613,313,0.402,0.98,False,5,0.985,0.963,True
+Megakaryocytes,3434,191,0.423,0.999,False,4,0.54,0.998,True
+ENS glia,3206,135,0.647,0.969,True,3,0.995,0.966,True
+Ciliated epithelial cells,2871,218,0.889,0.995,True,2,0.99,0.995,True
+ENS neurons,2507,140,0.418,0.998,False,4,0.956,0.997,True
+Parietal and chief cells,2314,311,0.974,0.994,True,1,0.974,0.994,True
+Horizontal cells,2292,87,0.997,0.993,True,1,0.997,0.993,True
+Squamous epithelial cells,2189,312,0.674,0.994,True,4,0.991,0.968,True
+Mesothelial cells,2022,222,0.503,0.85,True,6,0.957,0.908,True
+Epicardial fat cells,1873,119,0.999,0.998,True,1,0.999,0.998,True
+Neuroendocrine cells,1777,220,0.769,0.811,True,2,0.931,0.837,True
+Schwann cells,1750,22,0.53,0.983,True,3,0.955,0.988,True
+Stellate cells,1730,189,0.999,0.992,True,1,0.999,0.992,True
+Extravillous trophoblasts,1323,282,0.997,0.94,True,1,0.997,0.94,True
+Bipolar cells,1167,92,0.994,0.994,True,1,0.994,0.994,True
+Hematopoietic stem cells,1088,187,0.903,0.398,False,1,0.903,0.398,False
+Trophoblast giant cells,974,283,0.996,0.943,True,1,0.996,0.943,True
+PDE11A_FAM19A2 positive cells,793,95,0.999,1.0,True,1,0.999,1.0,True
+MUC13_DMBT1 positive cells,790,316,0.908,0.953,True,1,0.908,0.953,True
+Retinal pigment cells,700,96,0.999,0.99,True,1,0.999,0.99,True
+IGFBP1_DKK1 positive cells,682,286,0.997,0.991,True,1,0.997,0.991,True
+Visceral neurons,606,124,0.558,0.531,True,1,0.558,0.531,True
+Antigen presenting cells,458,338,0.648,0.917,True,2,0.895,0.938,True
+SATB2_LRRC7 positive cells,311,124,0.955,0.467,False,0,0.0,0.0,False
+PAEP_MECOM positive cells,275,291,0.975,0.996,True,1,0.975,0.996,True
+Thymic epithelial cells,254,339,1.0,1.0,True,1,1.0,1.0,True
+Lens fibre cells,228,103,1.0,1.0,True,1,1.0,1.0,True
+CCL19_CCL21 positive cells,198,270,0.975,0.99,True,1,0.975,0.99,True
+ELF3_AGBL2 positive cells,159,107,0.415,0.005,False,0,0.0,0.0,False
+AFP_ALB positive cells,127,310,0.528,1.0,True,2,0.984,1.0,True
+CSH1_CSH2 positive cells,104,17,0.279,0.005,False,0,0.0,0.0,False
+Corneal and conjunctival epithelial cells,104,102,0.971,0.433,False,0,0.0,0.0,False
+CLC_IL5RA positive cells,98,107,0.194,0.001,False,0,0.0,0.0,False
+PDE1C_ACSM3 positive cells,78,328,0.846,0.957,True,1,0.846,0.957,True
+SLC26A4_PAEP positive cells,67,1,0.433,0.001,False,0,0.0,0.0,False

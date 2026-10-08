@@ -1,0 +1,82 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/polariseq-core",
+    "crates/polariseq-hdf5-raw",
+    "crates/polariseq-io",
+    "crates/polariseq-python",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+authors = ["Uthamkumar M <uthamkumar.work@gmail.com>", "Abhi Dutta", "Trayambak Basak <trayambak@iitmandi.ac.in>"]
+description = "Fast, memory-aware single-cell RNA-seq analysis, in memory or out of core"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/DarkOxygen123/Polariseq"
+homepage = "https://github.com/DarkOxygen123/Polariseq"
+documentation = "https://github.com/DarkOxygen123/Polariseq#readme"
+keywords = ["bioinformatics", "single-cell", "omics", "scRNA", "sparse"]
+categories = ["science", "mathematics"]
+exclude = ["/target", "/data", "/datasets"]
+
+[workspace.dependencies]
+# Internal crates
+polariseq-core = { path = "crates/polariseq-core" }
+polariseq-io = { path = "crates/polariseq-io" }
+
+# Linear algebra / numerics — faer is pure-Rust, OpenBLAS-class, no BLAS linkage.
+# Used for SVD (PCA) and other decompositions.
+faer = "0.21"
+# rsvd-faer = "0.1"   # randomized SVD for 1M+ cell PCA (Phase 2 optimization)
+
+# Sparse matrices (CSR/CSC). The weakest area of the Rust numerics ecosystem;
+# validated against sparsity patterns in Phase 1.
+sprs = "0.11"
+
+# Parallelism / SIMD
+rayon = "1.10"
+
+# Small fixed-size matrices (for affine/3D utility code only)
+nalgebra = "0.33"
+
+# RNG — rand family (no PCG crate: unmaintained). ChaCha is the safe default.
+rand = "0.10"
+rand_chacha = "0.10"
+
+# File format IO (Phase 1+). anndata-rs is scverse's own Rust AnnData reader;
+# it handles both .h5ad (HDF5) and AnnData-Zarr.
+# anndata = "0.7"       # Phase 1
+# zarrs = "0.17"        # Phase 6
+# hdf5 = "0.8"          # Phase 1 low-level fallback
+
+# Graph algorithms (Phase 3+)
+
+# Python bindings — PyO3 0.29 has full Python 3.14 (and 3.15 beta) support.
+pyo3 = { version = "0.29", features = ["extension-module"] }
+numpy = "0.29"
+# pyo3-arrow = "0.7"    # added with Arrow metadata support
+
+# Dev tooling
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# Memory-mapped file IO for out-of-core processing
+memmap2 = "0.9"
+# HDF5 bindings (the maintained fork — the original hdf5-rust can't parse HDF5 2.x)
+hdf5-metno = "0.14"
+flate2 = "1"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+debug = false
+strip = "symbols"
+
+# A faster-to-compile release profile for dev iterations that still gets real numbers.
+[profile.release-fast]
+inherits = "release"
+lto = false
+codegen-units = 16

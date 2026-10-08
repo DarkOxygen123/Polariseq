@@ -1,0 +1,270 @@
+{
+ "dataset": {
+  "files": [
+   "<run folder>/data/scTab/h5ad/0.h5ad",
+   "<run folder>/data/scTab/h5ad/1.h5ad",
+   "<run folder>/data/scTab/h5ad/2.h5ad",
+   "<run folder>/data/scTab/h5ad/3.h5ad",
+   "<run folder>/data/scTab/h5ad/4.h5ad",
+   "<run folder>/data/scTab/h5ad/5.h5ad",
+   "<run folder>/data/scTab/h5ad/6.h5ad",
+   "<run folder>/data/scTab/h5ad/7.h5ad",
+   "<run folder>/data/scTab/h5ad/8.h5ad",
+   "<run folder>/data/scTab/h5ad/9.h5ad",
+   "<run folder>/data/scTab/h5ad/10.h5ad",
+   "<run folder>/data/scTab/h5ad/11.h5ad",
+   "<run folder>/data/scTab/h5ad/12.h5ad",
+   "<run folder>/data/scTab/h5ad/13.h5ad",
+   "<run folder>/data/scTab/h5ad/14.h5ad",
+   "<run folder>/data/scTab/h5ad/15.h5ad",
+   "<run folder>/data/scTab/h5ad/16.h5ad",
+   "<run folder>/data/scTab/h5ad/17.h5ad",
+   "<run folder>/data/scTab/h5ad/18.h5ad",
+   "<run folder>/data/scTab/h5ad/19.h5ad",
+   "<run folder>/data/scTab/h5ad/20.h5ad",
+   "<run folder>/data/scTab/h5ad/21.h5ad",
+   "<run folder>/data/scTab/h5ad/22.h5ad",
+   "<run folder>/data/scTab/h5ad/23.h5ad",
+   "<run folder>/data/scTab/h5ad/24.h5ad",
+   "<run folder>/data/scTab/h5ad/25.h5ad",
+   "<run folder>/data/scTab/h5ad/26.h5ad",
+   "<run folder>/data/scTab/h5ad/27.h5ad",
+   "<run folder>/data/scTab/h5ad/28.h5ad",
+   "<run folder>/data/scTab/h5ad/29.h5ad",
+   "<run folder>/data/scTab/h5ad/30.h5ad",
+   "<run folder>/data/scTab/h5ad/31.h5ad",
+   "<run folder>/data/scTab/h5ad/32.h5ad",
+   "<run folder>/data/scTab/h5ad/33.h5ad",
+   "<run folder>/data/scTab/h5ad/34.h5ad",
+   "<run folder>/data/scTab/h5ad/35.h5ad",
+   "<run folder>/data/scTab/h5ad/36.h5ad",
+   "<run folder>/data/scTab/h5ad/37.h5ad",
+   "<run folder>/data/scTab/h5ad/38.h5ad",
+   "<run folder>/data/scTab/h5ad/39.h5ad",
+   "<run folder>/data/scTab/h5ad/40.h5ad",
+   "<run folder>/data/scTab/h5ad/41.h5ad",
+   "<run folder>/data/scTab/h5ad/42.h5ad",
+   "<run folder>/data/scTab/h5ad/43.h5ad",
+   "<run folder>/data/scTab/h5ad/44.h5ad",
+   "<run folder>/data/scTab/h5ad/45.h5ad",
+   "<run folder>/data/scTab/h5ad/46.h5ad",
+   "<run folder>/data/scTab/h5ad/47.h5ad",
+   "<run folder>/data/scTab/h5ad/48.h5ad",
+   "<run folder>/data/scTab/h5ad/49.h5ad",
+   "<run folder>/data/scTab/h5ad/50.h5ad",
+   "<run folder>/data/scTab/h5ad/51.h5ad",
+   "<run folder>/data/scTab/h5ad/52.h5ad",
+   "<run folder>/data/scTab/h5ad/53.h5ad",
+   "<run folder>/data/scTab/h5ad/54.h5ad",
+   "<run folder>/data/scTab/h5ad/55.h5ad",
+   "<run folder>/data/scTab/h5ad/56.h5ad",
+   "<run folder>/data/scTab/h5ad/57.h5ad",
+   "<run folder>/data/scTab/h5ad/58.h5ad",
+   "<run folder>/data/scTab/h5ad/59.h5ad",
+   "<run folder>/data/scTab/h5ad/60.h5ad",
+   "<run folder>/data/scTab/h5ad/61.h5ad",
+   "<run folder>/data/scTab/h5ad/62.h5ad",
+   "<run folder>/data/scTab/h5ad/63.h5ad",
+   "<run folder>/data/scTab/h5ad/64.h5ad",
+   "<run folder>/data/scTab/h5ad/65.h5ad",
+   "<run folder>/data/scTab/h5ad/66.h5ad",
+   "<run folder>/data/scTab/h5ad/67.h5ad",
+   "<run folder>/data/scTab/h5ad/68.h5ad",
+   "<run folder>/data/scTab/h5ad/69.h5ad",
+   "<run folder>/data/scTab/h5ad/70.h5ad",
+   "<run folder>/data/scTab/h5ad/71.h5ad",
+   "<run folder>/data/scTab/h5ad/72.h5ad",
+   "<run folder>/data/scTab/h5ad/73.h5ad",
+   "<run folder>/data/scTab/h5ad/74.h5ad",
+   "<run folder>/data/scTab/h5ad/75.h5ad",
+   "<run folder>/data/scTab/h5ad/76.h5ad",
+   "<run folder>/data/scTab/h5ad/77.h5ad",
+   "<run folder>/data/scTab/h5ad/78.h5ad",
+   "<run folder>/data/scTab/h5ad/79.h5ad",
+   "<run folder>/data/scTab/h5ad/80.h5ad",
+   "<run folder>/data/scTab/h5ad/81.h5ad",
+   "<run folder>/data/scTab/h5ad/82.h5ad",
+   "<run folder>/data/scTab/h5ad/83.h5ad",
+   "<run folder>/data/scTab/h5ad/84.h5ad",
+   "<run folder>/data/scTab/h5ad/85.h5ad",
+   "<run folder>/data/scTab/h5ad/86.h5ad",
+   "<run folder>/data/scTab/h5ad/87.h5ad",
+   "<run folder>/data/scTab/h5ad/88.h5ad",
+   "<run folder>/data/scTab/h5ad/89.h5ad",
+   "<run folder>/data/scTab/h5ad/90.h5ad",
+   "<run folder>/data/scTab/h5ad/91.h5ad",
+   "<run folder>/data/scTab/h5ad/92.h5ad",
+   "<run folder>/data/scTab/h5ad/93.h5ad",
+   "<run folder>/data/scTab/h5ad/94.h5ad",
+   "<run folder>/data/scTab/h5ad/95.h5ad",
+   "<run folder>/data/scTab/h5ad/96.h5ad",
+   "<run folder>/data/scTab/h5ad/97.h5ad",
+   "<run folder>/data/scTab/h5ad/98.h5ad",
+   "<run folder>/data/scTab/h5ad/99.h5ad"
+  ],
+  "cells_in_file": 22190622,
+  "genes": 19331,
+  "stored_values": 46187527591,
+  "cells_after_qc": 22137595,
+  "genes_after_qc": 19307,
+  "genes_for_pca": 2000,
+  "clusters": 97
+ },
+ "settings": {
+  "ram_gb": 100.0,
+  "threads": null,
+  "mode": "auto",
+  "min_genes": 200,
+  "min_cells": 3,
+  "n_hvg": 2000,
+  "hvg_flavor": "seurat_floor",
+  "scarf_normalization": true,
+  "umap_init": "multilevel",
+  "umap_min_dist": 0.5,
+  "umap_epochs": 100,
+  "n_pcs": 50,
+  "neighbors": 15,
+  "resolution": 1.0,
+  "seed": 0,
+  "umap": true,
+  "keep_obs": "soma_joinid,cell_type,donor_id,dataset_id,assay,tissue_general,disease",
+  "color_by": "cell_type",
+  "no_export": false,
+  "not_counts": false
+ },
+ "mode": "out-of-core",
+ "budget": {
+  "ram_gb": 100.0,
+  "threads": 8
+ },
+ "plan": {
+  "ram": {
+   "fits": false,
+   "peak_gb": 739.32796644,
+   "limiting_step": "load",
+   "cells_per_block": 32768
+  },
+  "spill": {
+   "fits": true,
+   "peak_gb": 39.190313464,
+   "limiting_step": "hvg",
+   "cells_per_block": 32768
+  }
+ },
+ "seconds_total": 6583.577363850549,
+ "peak_memory_gb": {
+  "held_sampled": 39.37355776,
+  "held_os": 39.37355776,
+  "lowest_free": 142.867124224
+ },
+ "disk_gb": {
+  "project": 58.22315375,
+  "written_during_run": 65.50827827199828,
+  "by_part": {
+   "scratch": 0.0,
+   "runs/0+99_more_b58a9d3f/matrix": 46.637820838,
+   "runs/0+99_more_b58a9d3f/latents": 0.0,
+   "runs/0+99_more_b58a9d3f/results": 11.585332912
+  }
+ },
+ "steps": [
+  {
+   "step": "open",
+   "start_s": 0.0022071581333875656,
+   "seconds": 27.31491440348327,
+   "peak_rss_gb": 2.780893184
+  },
+  {
+   "step": "qc (and the one-time copy of the counts)",
+   "start_s": 27.31730219721794,
+   "seconds": 615.7394413072616,
+   "peak_rss_gb": 6.556442624
+  },
+  {
+   "step": "normalize",
+   "start_s": 643.0571665558964,
+   "seconds": 319.4994594398886,
+   "peak_rss_gb": 4.34245632
+  },
+  {
+   "step": "hvg",
+   "start_s": 962.5582978241146,
+   "seconds": 556.5611029099673,
+   "peak_rss_gb": 39.37355776
+  },
+  {
+   "step": "renormalize",
+   "start_s": 1519.126897616312,
+   "seconds": 298.5096203368157,
+   "peak_rss_gb": 4.099780608
+  },
+  {
+   "step": "pca",
+   "start_s": 1817.6370232459158,
+   "seconds": 1737.7133893743157,
+   "peak_rss_gb": 28.033929216
+  },
+  {
+   "step": "neighbors",
+   "start_s": 3555.3619060050696,
+   "seconds": 859.3347111027688,
+   "peak_rss_gb": 30.827040768
+  },
+  {
+   "step": "leiden",
+   "start_s": 4414.697469159961,
+   "seconds": 619.2546596694738,
+   "peak_rss_gb": 27.046424576
+  },
+  {
+   "step": "umap",
+   "start_s": 5033.953417353332,
+   "seconds": 1188.6295412126929,
+   "peak_rss_gb": 33.876017152
+  },
+  {
+   "step": "figures",
+   "start_s": 6222.584049437195,
+   "seconds": 29.556524980813265,
+   "peak_rss_gb": 12.5780992
+  },
+  {
+   "step": "export",
+   "start_s": 6252.2378135845065,
+   "seconds": 331.3381307646632,
+   "peak_rss_gb": 10.903228416
+  }
+ ],
+ "machine": {
+  "os": "Linux-3.10.0-1160.el7.x86_64-x86_64-with-glibc2.17",
+  "python": "3.12.14",
+  "cpu": "Intel(R) Xeon(R) Platinum 8268 CPU @ 2.90GHz",
+  "cores_physical": 48,
+  "cores_logical": 48,
+  "memory_gb": 201.5,
+  "scheduler_allocation": {
+   "cpus": "8",
+   "memory_mb": "153600"
+  },
+  "project_disk_free_gb": 698984.7,
+  "project_filesystem": "lustre",
+  "polariseq": {
+   "python_version": "0.1.0b1",
+   "rust_core_version": "0.1.0",
+   "matched": true
+  }
+ },
+ "outputs": [
+  "qc.png",
+  "pca.png",
+  "clusters.png",
+  "umap.png",
+  "umap_cell_type.png",
+  "figure_data.json",
+  "resources.csv",
+  "resources.png",
+  "report.json",
+  "run_summary.md",
+  "cells.tsv.gz"
+ ]
+}

@@ -1,0 +1,549 @@
+{
+ "n_cells": 4000604,
+ "paris_seconds": 74.3,
+ "paris_peak_footprint_gb": 5.66,
+ "curve": [
+  {
+   "clusters": 10,
+   "recovered": 8,
+   "own_type_cells": 0.6566
+  },
+  {
+   "clusters": 20,
+   "recovered": 15,
+   "own_type_cells": 0.8527
+  },
+  {
+   "clusters": 30,
+   "recovered": 20,
+   "own_type_cells": 0.9014
+  },
+  {
+   "clusters": 46,
+   "recovered": 24,
+   "own_type_cells": 0.9293
+  },
+  {
+   "clusters": 60,
+   "recovered": 24,
+   "own_type_cells": 0.931
+  },
+  {
+   "clusters": 80,
+   "recovered": 26,
+   "own_type_cells": 0.9341
+  },
+  {
+   "clusters": 100,
+   "recovered": 28,
+   "own_type_cells": 0.9372
+  },
+  {
+   "clusters": 132,
+   "recovered": 31,
+   "own_type_cells": 0.9404
+  },
+  {
+   "clusters": 150,
+   "recovered": 32,
+   "own_type_cells": 0.9409
+  },
+  {
+   "clusters": 185,
+   "recovered": 32,
+   "own_type_cells": 0.9418
+  },
+  {
+   "clusters": 223,
+   "recovered": 34,
+   "own_type_cells": 0.9436
+  },
+  {
+   "clusters": 260,
+   "recovered": 34,
+   "own_type_cells": 0.9437
+  },
+  {
+   "clusters": 300,
+   "recovered": 36,
+   "own_type_cells": 0.9449
+  },
+  {
+   "clusters": 350,
+   "recovered": 36,
+   "own_type_cells": 0.946
+  },
+  {
+   "clusters": 400,
+   "recovered": 37,
+   "own_type_cells": 0.9474
+  },
+  {
+   "clusters": 500,
+   "recovered": 38,
+   "own_type_cells": 0.9486
+  },
+  {
+   "clusters": 650,
+   "recovered": 38,
+   "own_type_cells": 0.9495
+  },
+  {
+   "clusters": 800,
+   "recovered": 38,
+   "own_type_cells": 0.9495
+  }
+ ],
+ "tree_k": 30,
+ "Z": [
+  [
+   25,
+   16,
+   1.1381976085607206,
+   0.0
+  ],
+  [
+   0,
+   28,
+   1.2286546072050508,
+   0.0
+  ],
+  [
+   2,
+   31,
+   1.383940736390194,
+   0.0
+  ],
+  [
+   22,
+   8,
+   1.417150313560637,
+   0.0
+  ],
+  [
+   11,
+   20,
+   1.5536238734010552,
+   0.0
+  ],
+  [
+   13,
+   15,
+   1.5709246444350498,
+   0.0
+  ],
+  [
+   35,
+   33,
+   1.7481132248475826,
+   0.0
+  ],
+  [
+   6,
+   29,
+   3.7729019757500226,
+   0.0
+  ],
+  [
+   34,
+   14,
+   3.8585525336072335,
+   0.0
+  ],
+  [
+   30,
+   7,
+   4.179078311748328,
+   0.0
+  ],
+  [
+   19,
+   36,
+   5.161586623672971,
+   0.0
+  ],
+  [
+   3,
+   21,
+   6.058418369442665,
+   0.0
+  ],
+  [
+   32,
+   5,
+   7.060253885177982,
+   0.0
+  ],
+  [
+   10,
+   40,
+   7.405136455548843,
+   0.0
+  ],
+  [
+   41,
+   9,
+   9.919931010153874,
+   0.0
+  ],
+  [
+   26,
+   39,
+   11.081123669068223,
+   0.0
+  ],
+  [
+   45,
+   23,
+   11.891517612626238,
+   0.0
+  ],
+  [
+   38,
+   46,
+   15.787893320403557,
+   0.0
+  ],
+  [
+   24,
+   47,
+   17.412190711732425,
+   0.0
+  ],
+  [
+   42,
+   43,
+   18.631479014938613,
+   0.0
+  ],
+  [
+   48,
+   12,
+   26.338724438057962,
+   0.0
+  ],
+  [
+   44,
+   49,
+   36.8838089511666,
+   0.0
+  ],
+  [
+   51,
+   1,
+   50.13446757233589,
+   0.0
+  ],
+  [
+   27,
+   50,
+   59.64801564331465,
+   0.0
+  ],
+  [
+   18,
+   53,
+   69.7881306563345,
+   0.0
+  ],
+  [
+   54,
+   4,
+   115.1398716407184,
+   0.0
+  ],
+  [
+   52,
+   37,
+   155.41330541975734,
+   0.0
+  ],
+  [
+   55,
+   17,
+   225.2220457721803,
+   0.0
+  ],
+  [
+   57,
+   56,
+   364.7713075414133,
+   0.0
+  ]
+ ],
+ "leaves": [
+  {
+   "cluster": 0,
+   "cells": 467705,
+   "type": "Excitatory neurons",
+   "type_share": 0.989,
+   "organ": "Cerebrum",
+   "organ_share": 0.994
+  },
+  {
+   "cluster": 1,
+   "cells": 382030,
+   "type": "Granule neurons",
+   "type_share": 0.806,
+   "organ": "Cerebellum",
+   "organ_share": 0.945
+  },
+  {
+   "cluster": 2,
+   "cells": 325980,
+   "type": "Excitatory neurons",
+   "type_share": 0.993,
+   "organ": "Cerebrum",
+   "organ_share": 0.997
+  },
+  {
+   "cluster": 3,
+   "cells": 315367,
+   "type": "Astrocytes",
+   "type_share": 0.989,
+   "organ": "Cerebellum",
+   "organ_share": 0.845
+  },
+  {
+   "cluster": 4,
+   "cells": 314685,
+   "type": "Adrenocortical cells",
+   "type_share": 0.997,
+   "organ": "Adrenal",
+   "organ_share": 1.0
+  },
+  {
+   "cluster": 5,
+   "cells": 299532,
+   "type": "Excitatory neurons",
+   "type_share": 0.988,
+   "organ": "Cerebrum",
+   "organ_share": 0.996
+  },
+  {
+   "cluster": 6,
+   "cells": 294049,
+   "type": "Purkinje neurons",
+   "type_share": 0.944,
+   "organ": "Cerebellum",
+   "organ_share": 0.947
+  },
+  {
+   "cluster": 7,
+   "cells": 229552,
+   "type": "Stromal cells",
+   "type_share": 0.634,
+   "organ": "Lung",
+   "organ_share": 0.378
+  },
+  {
+   "cluster": 8,
+   "cells": 180990,
+   "type": "Inhibitory neurons",
+   "type_share": 0.713,
+   "organ": "Cerebrum",
+   "organ_share": 0.762
+  },
+  {
+   "cluster": 9,
+   "cells": 147183,
+   "type": "Excitatory neurons",
+   "type_share": 0.979,
+   "organ": "Cerebrum",
+   "organ_share": 0.989
+  },
+  {
+   "cluster": 10,
+   "cells": 129823,
+   "type": "Inhibitory interneurons",
+   "type_share": 0.933,
+   "organ": "Cerebellum",
+   "organ_share": 0.947
+  },
+  {
+   "cluster": 11,
+   "cells": 104137,
+   "type": "Bronchiolar and alveolar epithelial cells",
+   "type_share": 0.956,
+   "organ": "Lung",
+   "organ_share": 0.986
+  },
+  {
+   "cluster": 12,
+   "cells": 99647,
+   "type": "Erythroblasts",
+   "type_share": 0.427,
+   "organ": "Liver",
+   "organ_share": 0.458
+  },
+  {
+   "cluster": 13,
+   "cells": 98415,
+   "type": "Inhibitory neurons",
+   "type_share": 0.982,
+   "organ": "Cerebrum",
+   "organ_share": 0.992
+  },
+  {
+   "cluster": 14,
+   "cells": 96934,
+   "type": "Metanephric cells",
+   "type_share": 0.92,
+   "organ": "Kidney",
+   "organ_share": 0.983
+  },
+  {
+   "cluster": 15,
+   "cells": 96603,
+   "type": "Inhibitory neurons",
+   "type_share": 0.914,
+   "organ": "Cerebrum",
+   "organ_share": 0.988
+  },
+  {
+   "cluster": 16,
+   "cells": 72738,
+   "type": "Vascular endothelial cells",
+   "type_share": 0.779,
+   "organ": "Lung",
+   "organ_share": 0.248
+  },
+  {
+   "cluster": 17,
+   "cells": 64933,
+   "type": "Cardiomyocytes",
+   "type_share": 0.995,
+   "organ": "Heart",
+   "organ_share": 0.999
+  },
+  {
+   "cluster": 18,
+   "cells": 48180,
+   "type": "Hepatoblasts",
+   "type_share": 0.986,
+   "organ": "Liver",
+   "organ_share": 0.988
+  },
+  {
+   "cluster": 19,
+   "cells": 44786,
+   "type": "Limbic system neurons",
+   "type_share": 0.977,
+   "organ": "Cerebrum",
+   "organ_share": 0.994
+  },
+  {
+   "cluster": 20,
+   "cells": 42265,
+   "type": "Intestinal epithelial cells",
+   "type_share": 0.572,
+   "organ": "Intestine",
+   "organ_share": 0.577
+  },
+  {
+   "cluster": 21,
+   "cells": 33577,
+   "type": "Oligodendrocytes",
+   "type_share": 0.975,
+   "organ": "Cerebrum",
+   "organ_share": 0.527
+  },
+  {
+   "cluster": 22,
+   "cells": 28361,
+   "type": "Retinal progenitors and Muller glia",
+   "type_share": 0.459,
+   "organ": "Eye",
+   "organ_share": 0.913
+  },
+  {
+   "cluster": 23,
+   "cells": 24361,
+   "type": "Chromaffin cells",
+   "type_share": 0.82,
+   "organ": "Adrenal",
+   "organ_share": 0.977
+  },
+  {
+   "cluster": 24,
+   "cells": 16501,
+   "type": "Syncytiotrophoblasts and villous cytotrophoblasts",
+   "type_share": 0.848,
+   "organ": "Placenta",
+   "organ_share": 0.988
+  },
+  {
+   "cluster": 25,
+   "cells": 14143,
+   "type": "Vascular endothelial cells",
+   "type_share": 0.993,
+   "organ": "Cerebrum",
+   "organ_share": 0.525
+  },
+  {
+   "cluster": 26,
+   "cells": 12223,
+   "type": "Skeletal muscle cells",
+   "type_share": 0.981,
+   "organ": "Muscle",
+   "organ_share": 0.989
+  },
+  {
+   "cluster": 27,
+   "cells": 10670,
+   "type": "Acinar cells",
+   "type_share": 0.997,
+   "organ": "Pancreas",
+   "organ_share": 1.0
+  },
+  {
+   "cluster": 28,
+   "cells": 4969,
+   "type": "Excitatory neurons",
+   "type_share": 0.732,
+   "organ": "Cerebrum",
+   "organ_share": 0.815
+  },
+  {
+   "cluster": 29,
+   "cells": 265,
+   "type": "Purkinje neurons",
+   "type_share": 0.94,
+   "organ": "Cerebellum",
+   "organ_share": 1.0
+  }
+ ],
+ "leiden": [
+  {
+   "resolution": "0.5",
+   "n_clusters": 32,
+   "types_recovered_allowing_splits": 21,
+   "cells_in_cluster_of_own_type": 0.9125
+  },
+  {
+   "resolution": "1",
+   "n_clusters": 43,
+   "types_recovered_allowing_splits": 23,
+   "cells_in_cluster_of_own_type": 0.9278
+  },
+  {
+   "resolution": "2",
+   "n_clusters": 56,
+   "types_recovered_allowing_splits": 25,
+   "cells_in_cluster_of_own_type": 0.939
+  },
+  {
+   "resolution": "3",
+   "n_clusters": 70,
+   "types_recovered_allowing_splits": 28,
+   "cells_in_cluster_of_own_type": 0.9309
+  },
+  {
+   "resolution": "4",
+   "n_clusters": 80,
+   "types_recovered_allowing_splits": 28,
+   "cells_in_cluster_of_own_type": 0.9447
+  }
+ ],
+ "node": true
+}
