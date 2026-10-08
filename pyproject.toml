@@ -1,0 +1,96 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "polariseq"
+version = "0.1.0"
+description = "Fast, memory-aware single-cell RNA-seq analysis, in memory or out of core, from a laptop to atlas scale"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "GPL-3.0-or-later" }
+authors = [
+    { name = "Uthamkumar M", email = "uthamkumar.work@gmail.com" },
+    { name = "Abhi Dutta" },
+    { name = "Trayambak Basak", email = "trayambak@iitmandi.ac.in" },
+]
+keywords = ["single-cell", "scRNA-seq", "bioinformatics", "out-of-core", "atlas", "clustering", "UMAP"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Rust",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "matplotlib>=3.7",
+    "pandas>=2.0",  # imported by polariseq.plotting at import time
+]
+
+[project.urls]
+Homepage = "https://github.com/DarkOxygen123/Polariseq"
+Documentation = "https://github.com/DarkOxygen123/Polariseq#readme"
+Source = "https://github.com/DarkOxygen123/Polariseq"
+Issues = "https://github.com/DarkOxygen123/Polariseq/issues"
+Changelog = "https://github.com/DarkOxygen123/Polariseq/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+annotation = [
+    "anndata>=0.10",
+    "pandas>=2.0",
+]
+celltypist = [
+    "celltypist>=1.0",
+    "anndata>=0.10",
+    "pandas>=2.0",
+]
+interactive = [
+    "plotly>=5.0",
+    "kaleido>=0.2",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.6",
+    "maturin>=1.7,<2.0",
+    "scanpy>=1.10",
+    "anndata>=0.10",
+]
+
+[tool.maturin]
+# The Rust cdylib crate is `polariseq-python` (lib name `_polariseq`). The
+# pure-Python package lives in `python/`.
+python-source = "python"
+module-name = "polariseq._polariseq"
+features = ["pyo3/extension-module"]
+manifest-path = "crates/polariseq-python/Cargo.toml"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# Over-length lines in the package are allowed for now. Every other rule is enforced here, including the ones that catch real
+# defects: `zip()` without `strict=` silently truncates when two sequences
+# disagree in length, which in this codebase means quietly dropping cells.
+"python/polariseq/*" = ["E501"]
+"python/polariseq/tests/*" = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["python/polariseq/tests", "tests"]
+python_files = ["test_*.py"]
+addopts = "-ra -q"

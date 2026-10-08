@@ -1,0 +1,14 @@
+[package]
+name = "polariseq-hdf5-raw"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Minimal raw-FFI HDF5 chunk access (H5Dread_chunk & friends) for the parallel loader"
+
+[dependencies]
+hdf5-metno = { workspace = true }
+hdf5-metno-sys = { version = "0.12", features = ["static", "zlib"] }
+flate2 = "1"
+
+[dev-dependencies]

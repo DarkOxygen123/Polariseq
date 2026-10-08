@@ -1,0 +1,20 @@
+[package]
+name = "polariseq-python"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description.workspace = true
+
+[lib]
+name = "_polariseq"
+crate-type = ["cdylib"]
+
+[dependencies]
+polariseq-core = { workspace = true }
+polariseq-io = { workspace = true }
+pyo3 = { workspace = true }
+numpy = { workspace = true }
+hdf5-metno = { workspace = true }
+memmap2 = { workspace = true }
+rayon = { workspace = true }

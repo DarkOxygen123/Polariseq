@@ -1,0 +1,19 @@
+# Build output
+/target/
+*.so
+*.pyd
+*.dylib
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# Example output and downloads (regenerable)
+examples/output/
+examples/data/
+
+# OS
+.DS_Store

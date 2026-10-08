@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "" # Override .cargo/config.toml's target-cpu=native for portable CI artifacts.
+  RUST_BACKTRACE: 1
+
+jobs:
+  rust-checks:
+    name: Rust fmt + clippy + test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable)
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup override set stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo fmt
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: cargo test
+        run: cargo test --all --verbose
+
+      - name: cargo bench (compile only)
+        run: cargo bench --no-run
+
+  python-bindings:
+    name: Python bindings (maturin + pytest)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+        python-version: ["3.10", "3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable)
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install maturin and dev deps
+        run: pip install --upgrade maturin pytest ruff numpy scanpy anndata psutil matplotlib
+
+      # Lint before building: it is the fastest signal and needs no build.
+      - name: ruff
+        run: ruff check python/ examples/
+
+      - name: Build and install (maturin develop)
+        run: maturin develop --release
+
+      - name: pytest
+        run: pytest -v
+
+      - name: quickstart example
+        run: python examples/01_quickstart.py
