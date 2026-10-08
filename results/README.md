@@ -28,7 +28,9 @@ One row per run, written by `benchmarks/export_tables.py`. Main columns:
 `status` (ok, or why the run stopped: out of memory, time limit), `rep`, the
 settings (`threads`, `budget_gb`, `n_hvg`, `n_pcs`, `n_neighbors`,
 `resolution`, `min_genes`, `seed`), `wall_s` and `pipeline_s` (the analysis
-without process start-up), the time of each step (`load_s` ... `umap_s`),
+without process start-up and imports: the times quoted for each tool), the time
+of each step (`load_s` ... `umap_s`; the out-of-core runs make one call from
+quality control through clustering, timed as `preprocess_s`),
 `peak_footprint_gb` (the headline memory measure on macOS), `peak_rss_gb`,
 `min_free_gb`, and what came out (`cells_kept`, `genes_kept`, `clusters`).
 

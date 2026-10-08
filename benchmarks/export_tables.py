@@ -3,8 +3,9 @@
     python benchmarks/export_tables.py RECORD_FOLDER OUT.csv [--campaign NAME]
 
 One row per run: the dataset and its size, the tool (arm), the repeat, the outcome, the parameters,
-the time of every step, the peak memory measures, the machine, and the software versions. The memory
-time series stay in the records; this table is what the comparisons are read from.
+the time of every step (pipeline_s: the analysis without process start-up and imports), the peak memory
+measures, the machine, and the software versions. The memory time series stay in the records; this table is
+what the comparisons are read from.
 """
 from __future__ import annotations
 
@@ -14,7 +15,9 @@ import glob
 import json
 import os
 
-STEPS = ["load", "qc", "filter_cells", "normalize", "log1p", "hvg", "renormalize", "pca", "neighbors",
+#: "preprocess" is the out-of-core arm's single call (ps.process_diskbacked: quality control through clustering),
+#: which the harness times as one step in place of the separate steps.
+STEPS = ["load", "preprocess", "qc", "filter_cells", "normalize", "log1p", "hvg", "renormalize", "pca", "neighbors",
          "leiden", "umap"]
 
 
