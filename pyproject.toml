@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "polariseq"
-version = "0.1.0"
+version = "0.1.1"
 description = "Fast, memory-aware single-cell RNA-seq analysis, in memory or out of core, from a laptop to atlas scale"
 readme = "README.md"
 requires-python = ">=3.10"

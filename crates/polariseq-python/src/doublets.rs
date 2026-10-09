@@ -36,7 +36,7 @@ fn batch_dict<'py>(py: Python<'py>, r: BatchResult) -> PyResult<Bound<'py, PyDic
 #[pyo3(signature = (matrix, batch, n_batches, scores, calls, *, sim_doublet_ratio=2.0,
     expected_doublet_rate=0.05, stdev_doublet_rate=0.02, n_neighbors=None, n_prin_comps=30,
     min_counts=3.0, min_cells=3, min_gene_variability_pctl=85.0, threshold=None, seed=0,
-    exact_knn_max=60_000, max_batch_bytes=1_073_741_824))]
+    exact_knn_max=None, max_batch_bytes=1_073_741_824))]
 #[allow(clippy::too_many_arguments)]
 pub fn scrublet<'py>(
     py: Python<'py>,
@@ -55,7 +55,7 @@ pub fn scrublet<'py>(
     min_gene_variability_pctl: f64,
     threshold: Option<f64>,
     seed: u64,
-    exact_knn_max: usize,
+    exact_knn_max: Option<usize>,
     max_batch_bytes: usize,
 ) -> PyResult<Bound<'py, PyList>> {
     let opts = ScrubletOptions {
@@ -69,7 +69,7 @@ pub fn scrublet<'py>(
         min_gene_variability_pctl,
         threshold,
         seed,
-        exact_knn_max,
+        exact_knn_max: exact_knn_max.unwrap_or(usize::MAX),
         max_batch_bytes,
     };
     let batch = batch.as_slice()?;

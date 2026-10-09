@@ -29,9 +29,9 @@
 //!   raw counts over the genes' deviations projected on the components. The
 //!   memory is `30` numbers per cell, not a second count matrix twice the
 //!   size of the first.
-//! - **Neighbours are exact** up to [`ScrubletOptions::exact_knn_max`]
-//!   points; the reference uses annoy's approximate search. Above that,
-//!   NN-descent.
+//! - **Neighbours are exact** (the reference uses annoy's approximate
+//!   search); NN-descent only above [`ScrubletOptions::exact_knn_max`]
+//!   points, if a limit is set.
 //!
 //! The reference's licence, which covers the parts of this module that follow
 //! its code:
@@ -130,7 +130,11 @@ pub struct ScrubletOptions {
     /// Random seed of the simulation (batch `b` uses `seed + b`).
     pub seed: u64,
     /// Points (cells and simulated doublets) up to which the neighbour
-    /// search is exact.
+    /// search is exact; above it, NN-descent. The default has no limit:
+    /// Scrublet's neighbour count grows as the square root of the batch, so
+    /// NN-descent's work grows with the square of the batch like the exact
+    /// search's, and it was slower at every batch size measured (94,000 and
+    /// 1.2 million points).
     pub exact_knn_max: usize,
     /// Bytes the batches' selected genes may occupy at once.
     pub max_batch_bytes: usize,
@@ -149,7 +153,7 @@ impl Default for ScrubletOptions {
             min_gene_variability_pctl: 85.0,
             threshold: None,
             seed: 0,
-            exact_knn_max: 60_000,
+            exact_knn_max: usize::MAX,
             max_batch_bytes: 1 << 30,
         }
     }
@@ -531,96 +535,397 @@ fn by_distance(a: &(f32, u32), b: &(f32, u32)) -> std::cmp::Ordering {
     a.0.total_cmp(&b.0).then(a.1.cmp(&b.1))
 }
 
-fn sift_up(h: &mut [(f32, u32)], mut i: usize) {
-    while i > 0 {
-        let parent = (i - 1) / 2;
-        if by_distance(&h[i], &h[parent]).is_gt() {
-            h.swap(i, parent);
-            i = parent;
-        } else {
-            break;
-        }
-    }
-}
-
-fn sift_down(h: &mut [(f32, u32)], mut i: usize) {
-    let n = h.len();
-    loop {
-        let (l, r) = (2 * i + 1, 2 * i + 2);
-        let mut top = i;
-        if l < n && by_distance(&h[l], &h[top]).is_gt() {
-            top = l;
-        }
-        if r < n && by_distance(&h[r], &h[top]).is_gt() {
-            top = r;
-        }
-        if top == i {
-            break;
-        }
-        h.swap(i, top);
-        i = top;
-    }
-}
-
 /// Exact `k` nearest neighbours of every point, itself excluded, ties broken
-/// by index: `n × k` indices. Tiles of queries run in parallel, one per
-/// thread; each takes its squared distances to every point from one matrix
-/// product, `|q|² + |p|² − 2 p·q` (at most 8 MB per tile), and keeps the
-/// nearest in a bounded max-heap.
+/// by index: `n × k` indices. Tiles of 128 queries run in parallel; each walks
+/// the points in blocks of 2,048, takes the block's squared distances
+/// `|q|² + |p|² − 2 p·q` from one matrix product (1 MB, so it stays in cache).
+/// Each query keeps the candidates within its current `k`-th distance in a
+/// buffer of `2k`; when the buffer fills, one selection keeps the nearest `k`
+/// and tightens that distance. A candidate is turned away only when `k`
+/// others are nearer, so the result is exact; a run of 16 candidates is
+/// turned away at once when none is within reach.
 fn knn_exact(p: &[f32], n: usize, d: usize, k: usize) -> Vec<u32> {
     use faer::linalg::matmul::matmul;
     use faer::{Accum, Mat, MatRef, Par};
+    const TILE: usize = 128;
+    const BLOCK: usize = 2048;
+    const RUN: usize = 16;
 
     let norms: Vec<f32> = p
         .chunks_exact(d)
         .map(|r| r.iter().map(|x| x * x).sum())
         .collect();
-    let all = MatRef::from_row_major_slice(p, n, d);
-    let tile = ((8usize << 20) / (4 * n).max(1)).clamp(8, 1024).min(n);
+    // Keep the nearest k of `buf` at its front and return the k-th distance.
+    let shrink = |buf: &mut [(f32, u32)]| -> f32 {
+        buf.select_nth_unstable_by(k - 1, by_distance);
+        buf[k - 1].0
+    };
     let mut out = vec![0_u32; n * k];
-    out.par_chunks_mut(tile * k)
+    out.par_chunks_mut(TILE * k)
         .enumerate()
         .for_each(|(ti, block)| {
-            let q0 = ti * tile;
+            let q0 = ti * TILE;
             let rows = block.len() / k;
             let q = MatRef::from_row_major_slice(&p[q0 * d..(q0 + rows) * d], rows, d);
-            // (n × rows), column-major: each query's dot products are contiguous.
-            let mut dots = Mat::<f32>::zeros(n, rows);
-            matmul(
-                dots.as_mut(),
-                Accum::Replace,
-                all,
-                q.transpose(),
-                1.0,
-                Par::Seq,
-            );
-            let mut heap: Vec<(f32, u32)> = Vec::with_capacity(k);
-            for (t, row) in block.chunks_mut(k).enumerate() {
-                let i = q0 + t;
-                heap.clear();
-                // Most candidates are turned away by one comparison with the
-                // farthest of the nearest so far.
-                for (j, &dot) in dots.col_as_slice(t).iter().enumerate() {
-                    if j == i {
-                        continue;
-                    }
-                    let c = (norms[i] + norms[j] - 2.0 * dot, j as u32);
-                    if heap.len() < k {
-                        heap.push(c);
-                        let last = heap.len() - 1;
-                        sift_up(&mut heap, last);
-                    } else if by_distance(&c, &heap[0]).is_lt() {
-                        heap[0] = c;
-                        sift_down(&mut heap, 0);
+            let mut dots = Mat::<f32>::zeros(BLOCK, rows);
+            // Each query's buffer: 2k slots plus one run of slack, filled to `used`.
+            let cap = 2 * k + RUN;
+            let mut bufs = vec![(0.0_f32, 0_u32); rows * cap];
+            let mut used = vec![0_usize; rows];
+            let mut reach = vec![f32::INFINITY; rows];
+            let mut dist = [0.0_f32; RUN];
+            for b0 in (0..n).step_by(BLOCK) {
+                let len = BLOCK.min(n - b0);
+                let pts = MatRef::from_row_major_slice(&p[b0 * d..(b0 + len) * d], len, d);
+                // (len × rows), column-major: each query's dot products are contiguous.
+                matmul(
+                    dots.as_mut().subrows_mut(0, len),
+                    Accum::Replace,
+                    pts,
+                    q.transpose(),
+                    1.0,
+                    Par::Seq,
+                );
+                let pn = &norms[b0..b0 + len];
+                for (t, ((buf, fill), tau)) in bufs
+                    .chunks_mut(cap)
+                    .zip(used.iter_mut())
+                    .zip(reach.iter_mut())
+                    .enumerate()
+                {
+                    let i = q0 + t;
+                    let ni = norms[i];
+                    let col = &dots.col_as_slice(t)[..len];
+                    let mut j0 = 0;
+                    while j0 < len {
+                        let run = RUN.min(len - j0);
+                        let mut nearest = f32::INFINITY;
+                        for r in 0..run {
+                            let x = ni + pn[j0 + r] - 2.0 * col[j0 + r];
+                            dist[r] = x;
+                            nearest = if x < nearest { x } else { nearest };
+                        }
+                        // Ties at the k-th distance are kept (they may win on index).
+                        if nearest <= *tau {
+                            // Branch-free: every candidate is written, the
+                            // count moves on only for those within reach.
+                            let base = b0 + j0;
+                            for r in 0..run {
+                                let j = base + r;
+                                buf[*fill] = (dist[r], j as u32);
+                                *fill += usize::from(dist[r] <= *tau && j != i);
+                            }
+                            if *fill >= 2 * k {
+                                *tau = shrink(&mut buf[..*fill]);
+                                *fill = k;
+                            }
+                        }
+                        j0 += run;
                     }
                 }
-                heap.sort_unstable_by(by_distance);
-                for (o, &(_, j)) in row.iter_mut().zip(heap.iter()) {
+            }
+            for ((row, buf), &len) in block.chunks_mut(k).zip(bufs.chunks_mut(cap)).zip(&used) {
+                let mut len = len;
+                if len > k {
+                    shrink(&mut buf[..len]);
+                    len = k;
+                }
+                let kept = &mut buf[..len];
+                kept.sort_unstable_by(by_distance);
+                for (o, &(_, j)) in row.iter_mut().zip(kept.iter()) {
                     *o = j;
                 }
             }
         });
     out
+}
+
+/// Below this many cells or selected genes the dense Gram matrix is cheaper
+/// than Lanczos.
+const LANCZOS_MIN_SIDE: usize = 160;
+
+/// A stored gene index.
+trait GeneIndex: Copy + Send + Sync {
+    fn at(self) -> usize;
+}
+
+impl GeneIndex for u16 {
+    #[inline]
+    fn at(self) -> usize {
+        usize::from(self)
+    }
+}
+
+impl GeneIndex for u32 {
+    #[inline]
+    fn at(self) -> usize {
+        self as usize
+    }
+}
+
+/// Gene indices of the standardized matrix: 16 bits when the batch has
+/// fewer than 65,536 selected genes (always, in practice), else 32.
+enum GeneIx {
+    U16(Vec<u16>),
+    U32(Vec<u32>),
+}
+
+/// The standardized counts `a_ig = x_ig w_i / σ_g` of one batch, by cell, as
+/// 32-bit values (the precision the dense route also stores them in; every
+/// sum is in `f64`). With the gene means `m` the standardized matrix is
+/// `Z = A − 1 mᵀ`, whose columns have mean zero.
+struct Standardized {
+    n: usize,
+    h: usize,
+    ptr: Vec<usize>,
+    ix: GeneIx,
+    val: Vec<f32>,
+}
+
+/// Rows per chunk of [`Standardized::gram_apply`]: fixed, so that the sums
+/// do not depend on the number of threads.
+const GRAM_CHUNK: usize = 1024;
+
+impl Standardized {
+    fn new(counts: &CsrMatrix, w: &[f64], sd: &[f64]) -> Self {
+        let (n, h) = (counts.nrows, counts.ncols);
+        let ptr: Vec<usize> = counts.indptr.iter().map(|&x| x as usize).collect();
+        let mut val = vec![0.0_f32; counts.data.len()];
+        for i in 0..n {
+            for t in ptr[i]..ptr[i + 1] {
+                val[t] = (f64::from(counts.data[t]) * w[i] / sd[counts.indices[t] as usize]) as f32;
+            }
+        }
+        let ix = if h <= usize::from(u16::MAX) + 1 {
+            GeneIx::U16(counts.indices.iter().map(|&c| c as u16).collect())
+        } else {
+            GeneIx::U32(counts.indices.clone())
+        };
+        Self { n, h, ptr, ix, val }
+    }
+
+    /// `out = Zᵀ Z q` in one pass over the cells: each cell's `t_i = z_i·q`
+    /// is scattered back into its chunk's gene vector (a few kilobytes, so
+    /// it stays in cache); the chunks are summed in order. `partial` is
+    /// scratch of `n_chunks × h`.
+    fn gram_apply(&self, m: &[f64], q: &[f64], partial: &mut [f64], out: &mut [f64]) {
+        match &self.ix {
+            GeneIx::U16(ix) => self.gram_apply_with(ix, m, q, partial, out),
+            GeneIx::U32(ix) => self.gram_apply_with(ix, m, q, partial, out),
+        }
+    }
+
+    fn gram_apply_with<I: GeneIndex>(
+        &self,
+        ix: &[I],
+        m: &[f64],
+        q: &[f64],
+        partial: &mut [f64],
+        out: &mut [f64],
+    ) {
+        let h = self.h;
+        let mq: f64 = dot(m, q);
+        let n_chunks = self.n.div_ceil(GRAM_CHUNK);
+        let mut tsum = vec![0.0_f64; n_chunks];
+        partial[..n_chunks * h]
+            .par_chunks_mut(h)
+            .zip(tsum.par_iter_mut())
+            .enumerate()
+            .for_each(|(c, (acc, ts))| {
+                acc.fill(0.0);
+                let mut s = 0.0;
+                for i in c * GRAM_CHUNK..((c + 1) * GRAM_CHUNK).min(self.n) {
+                    let (a, b) = (self.ptr[i], self.ptr[i + 1]);
+                    let (cols, vals) = (&ix[a..b], &self.val[a..b]);
+                    let mut t = 0.0;
+                    for (&g, &x) in cols.iter().zip(vals) {
+                        t += f64::from(x) * q[g.at()];
+                    }
+                    t -= mq;
+                    s += t;
+                    for (&g, &x) in cols.iter().zip(vals) {
+                        acc[g.at()] += f64::from(x) * t;
+                    }
+                }
+                *ts = s;
+            });
+        let st: f64 = tsum.iter().sum();
+        out.par_iter_mut()
+            .with_min_len(256)
+            .enumerate()
+            .for_each(|(g, og)| {
+                let mut acc = 0.0;
+                for c in 0..n_chunks {
+                    acc += partial[c * h + g];
+                }
+                *og = acc - st * m[g];
+            });
+    }
+}
+
+fn dot(a: &[f64], b: &[f64]) -> f64 {
+    // Four partial sums: vectorizable, and the same order on every run.
+    let mut s = [0.0_f64; 4];
+    let (ca, cb) = (a.chunks_exact(4), b.chunks_exact(4));
+    let (ra, rb) = (ca.remainder(), cb.remainder());
+    for (x, y) in ca.zip(cb) {
+        for l in 0..4 {
+            s[l] += x[l] * y[l];
+        }
+    }
+    let mut r = (s[0] + s[1]) + (s[2] + s[3]);
+    for (x, y) in ra.iter().zip(rb) {
+        r += x * y;
+    }
+    r
+}
+
+/// The `p` leading eigenvectors of `ZᵀZ` (gene weights, `v[g * p + j]`,
+/// component `j` largest first) by Lanczos with full reorthogonalization,
+/// started from a seeded random vector, run until every one of the `p`
+/// leading Ritz pairs has a residual below `1e-10` of the largest Ritz value
+/// (or the Krylov space is exhausted, which is exact). `None` if it has not
+/// converged within its step budget; the caller then uses the dense route.
+///
+/// The reference computes these components with ARPACK; the dense route
+/// computes every eigenvector of the `h × h` Gram matrix. All three give the
+/// same subspace to rounding, and the neighbours that follow depend only on
+/// the subspace (not on the components' signs).
+fn top_components_lanczos(
+    counts: &CsrMatrix,
+    w: &[f64],
+    sd: &[f64],
+    m: &[f64],
+    p: usize,
+    seed: u64,
+) -> Option<(Vec<f64>, usize)> {
+    let z = Standardized::new(counts, w, sd);
+    let (n, h) = (z.n, z.h);
+    // The centred matrix has rank at most min(n - 1, h).
+    let rank = (n - 1).min(h);
+    let max_steps = rank.min((10 * p).max(300));
+    let mut basis: Vec<f64> = Vec::with_capacity(max_steps * h);
+    let (mut alpha, mut beta) = (Vec::with_capacity(max_steps), Vec::with_capacity(max_steps));
+    let mut rng = ChaCha8Rng::seed_from_u64(seed ^ 0x5eed_1a2c_0500_0001);
+    let mut q: Vec<f64> = (0..h).map(|_| rng.random::<f64>() - 0.5).collect();
+    let norm = dot(&q, &q).sqrt();
+    for x in &mut q {
+        *x /= norm;
+    }
+    let mut partial = vec![0.0_f64; n.div_ceil(GRAM_CHUNK) * h];
+    let mut r = vec![0.0_f64; h];
+    let mut coef = vec![0.0_f64; max_steps];
+    let mut ritz: Option<(usize, Vec<f64>)> = None;
+    for step in 0..max_steps {
+        basis.extend_from_slice(&q);
+        z.gram_apply(m, &q, &mut partial, &mut r);
+        let a = dot(&q, &r);
+        alpha.push(a);
+        // Full reorthogonalization against every basis vector, twice (the
+        // three-term recurrence is implied by it).
+        let k = step + 1;
+        for _ in 0..2 {
+            coef[..k]
+                .par_iter_mut()
+                .with_min_len(8)
+                .enumerate()
+                .for_each(|(j, c)| {
+                    *c = dot(&basis[j * h..(j + 1) * h], &r);
+                });
+            for j in 0..k {
+                let c = coef[j];
+                for (x, &y) in r.iter_mut().zip(&basis[j * h..(j + 1) * h]) {
+                    *x -= c * y;
+                }
+            }
+        }
+        let bnorm = dot(&r, &r).sqrt();
+        let exhausted = k == max_steps || k == rank;
+        let check = k >= p && (exhausted || (k >= p + 10 && k % 5 == 0) || bnorm == 0.0);
+        if check {
+            let mut tri = faer::Mat::<f64>::zeros(k, k);
+            for j in 0..k {
+                tri[(j, j)] = alpha[j];
+                if j + 1 < k {
+                    tri[(j, j + 1)] = beta[j];
+                    tri[(j + 1, j)] = beta[j];
+                }
+            }
+            let eig = tri.as_ref().self_adjoint_eigen(faer::Side::Lower).ok()?;
+            let (s, u) = (eig.S(), eig.U());
+            let top = s[k - 1].abs().max(f64::MIN_POSITIVE);
+            // Ritz pair i's residual is |β_k · u[k-1, i]|.
+            let converged = bnorm <= 1e-14 * top
+                || k == rank
+                || (0..p).all(|j| (bnorm * u[(k - 1, k - 1 - j)]).abs() <= 1e-10 * top);
+            if converged {
+                let mut sel = vec![0.0_f64; k * p];
+                for i in 0..k {
+                    for j in 0..p {
+                        sel[i * p + j] = u[(i, k - 1 - j)];
+                    }
+                }
+                ritz = Some((k, sel));
+                break;
+            }
+        }
+        if bnorm == 0.0 || exhausted {
+            break;
+        }
+        beta.push(bnorm);
+        q.iter_mut().zip(&r).for_each(|(x, &y)| *x = y / bnorm);
+    }
+    let (k, sel) = ritz?;
+    // v = Vᵀ S: each gene's weights from the basis.
+    let mut v = vec![0.0_f64; h * p];
+    v.par_chunks_mut(p).enumerate().for_each(|(g, vg)| {
+        for i in 0..k {
+            let b = basis[i * h + g];
+            for j in 0..p {
+                vg[j] += b * sel[i * p + j];
+            }
+        }
+    });
+    Some((v, k))
+}
+
+/// The `p` leading eigenvectors of `ZᵀZ` from the dense `h × h` Gram matrix
+/// (every eigenvector computed): the route for small batches.
+fn top_components_dense(
+    counts: &CsrMatrix,
+    w: &[f64],
+    sd: &[f64],
+    m: &[f64],
+    p: usize,
+) -> Result<Vec<f64>, String> {
+    let (n, h) = (counts.nrows, counts.ncols);
+    let nf = n as f64;
+    let mut a = counts.clone();
+    for i in 0..n {
+        let (s, e) = (a.indptr[i] as usize, a.indptr[i + 1] as usize);
+        for t in s..e {
+            let c = a.indices[t] as usize;
+            a.data[t] = (f64::from(a.data[t]) * w[i] / sd[c]) as f32;
+        }
+    }
+    let mut gram = crate::rsvd::gram_matrix(crate::rsvd::CsrRef::from(&a));
+    drop(a);
+    gram.par_chunks_mut(h).enumerate().for_each(|(i, row)| {
+        for (j, x) in row.iter_mut().enumerate() {
+            *x -= nf * m[i] * m[j];
+        }
+    });
+    let eig = faer::MatRef::from_row_major_slice(&gram, h, h)
+        .self_adjoint_eigen(faer::Side::Lower)
+        .map_err(|e| format!("{e:?}"))?;
+    let vecs = eig.U();
+    let mut v = vec![0.0_f64; h * p];
+    for j in 0..p {
+        for g in 0..h {
+            v[g * p + j] = vecs[(g, h - 1 - j)];
+        }
+    }
+    Ok(v)
 }
 
 /// Score one batch; writes its cells' scores and calls.
@@ -684,42 +989,43 @@ fn score_batch(
         .collect();
     let m: Vec<f64> = mu.iter().zip(&sd).map(|(a, s)| a / s).collect();
 
-    // Principal components of the standardized cells: the centred Gram
-    // matrix of y/σ, whose mean is m.
-    let mut a = bc.counts.clone();
-    for i in 0..n {
-        let (s, e) = (a.indptr[i] as usize, a.indptr[i + 1] as usize);
-        for t in s..e {
-            let c = a.indices[t] as usize;
-            a.data[t] = (f64::from(a.data[t]) * w[i] / sd[c]) as f32;
-        }
+    // Principal components of the standardized cells (gene weights, largest
+    // component first): Lanczos on the sparse matrix, the dense Gram matrix
+    // for small batches or if Lanczos does not converge.
+    let lanczos = if n.min(h) > LANCZOS_MIN_SIDE {
+        top_components_lanczos(
+            &bc.counts,
+            &w,
+            &sd,
+            &m,
+            p,
+            opts.seed.wrapping_add(u64::from(b)),
+        )
+    } else {
+        None
+    };
+    if trace {
+        eprintln!(
+            "[scrublet {b}] {n} cells, {h} genes, {} nnz, PCA by {}",
+            bc.counts.data.len(),
+            lanczos
+                .as_ref()
+                .map_or("the dense Gram matrix".to_string(), |(_, k)| format!(
+                    "Lanczos in {k} steps"
+                ))
+        );
     }
-    let mut gram = crate::rsvd::gram_matrix(crate::rsvd::CsrRef::from(&a));
-    drop(a);
-    gram.par_chunks_mut(h).enumerate().for_each(|(i, row)| {
-        for (j, x) in row.iter_mut().enumerate() {
-            *x -= nf * m[i] * m[j];
-        }
-    });
-    let eig = match faer::MatRef::from_row_major_slice(&gram, h, h)
-        .self_adjoint_eigen(faer::Side::Lower)
-    {
-        Ok(e) => e,
-        Err(e) => {
-            res.note = Some(format!("PCA failed: {e:?}"));
-            return res;
-        }
+    let v = match lanczos.map(|(v, _)| v) {
+        Some(v) => v,
+        None => match top_components_dense(&bc.counts, &w, &sd, &m, p) {
+            Ok(v) => v,
+            Err(e) => {
+                res.note = Some(format!("PCA failed: {e}"));
+                return res;
+            }
+        },
     };
     phase("pca");
-    let vecs = eig.U();
-    // v[g * p + j]: gene g's weight in component j, largest first.
-    let mut v = vec![0.0_f64; h * p];
-    for j in 0..p {
-        for g in 0..h {
-            v[g * p + j] = vecs[(g, h - 1 - j)];
-        }
-    }
-    drop(gram);
 
     // u_i: raw counts over σ, projected; mv: the projected mean.
     let mut mv = vec![0.0_f64; p];
@@ -957,10 +1263,14 @@ pub fn scrublet_blocks(
                 + size[b] * 24
         })
     };
+    let need_bytes: Vec<usize> = (0..n_batches).map(bytes).collect();
+    // The per-gene sums are no longer needed (at 5,000 batches over 20,000
+    // genes they hold about 3 GB).
+    drop(stats);
     let mut groups: Vec<Vec<usize>> = Vec::new();
     let mut used = 0;
     for b in (0..n_batches).filter(|&b| size[b] > 0) {
-        let need = bytes(b);
+        let need = need_bytes[b];
         if groups.is_empty() || used + need > opts.max_batch_bytes {
             groups.push(Vec::new());
             used = 0;
@@ -1025,6 +1335,9 @@ pub fn scrublet_blocks(
                 e.vals.extend(part.vals);
             }
         }
+        // The group's batches are scored at once, largest first so that a big
+        // one does not start last; each also uses the threads left idle.
+        let mut ready: Vec<(usize, BatchCounts)> = Vec::with_capacity(per.len());
         for (b, part) in per {
             let n = part.rows.len();
             let mut indptr = Vec::with_capacity(n + 1);
@@ -1041,9 +1354,17 @@ pub fn scrublet_blocks(
                 counts,
                 rows: part.rows,
             };
-            results.push(score_batch(b as u32, &bc, opts, &scores_m, &calls_m));
+            ready.push((b, bc));
         }
+        ready.sort_by_key(|(b, bc)| (std::cmp::Reverse(bc.counts.data.len()), *b));
+        let done: Vec<BatchResult> = ready
+            .par_iter()
+            .with_max_len(1)
+            .map(|(b, bc)| score_batch(*b as u32, bc, opts, &scores_m, &calls_m))
+            .collect();
+        results.extend(done);
     }
+    results.sort_by_key(|r| r.batch);
     results
 }
 
@@ -1258,6 +1579,113 @@ mod tests {
         );
         let peeled = threshold_from_simulated(&v).unwrap();
         assert!(peeled > 0.14 && peeled < 0.2, "{peeled}");
+    }
+
+    /// Lanczos and the dense Gram matrix span the same leading subspace: the
+    /// projectors `V Vᵀ` agree to rounding, on counts with a few cell types.
+    #[test]
+    fn lanczos_matches_the_dense_components() {
+        let (n, h, p) = (900, 400, 30);
+        let mut rng = ChaCha8Rng::seed_from_u64(11);
+        let mut dense = vec![0.0_f32; n * h];
+        for i in 0..n {
+            let ty = i % 6;
+            for g in 0..h {
+                let lam = if g % 6 == ty {
+                    3.0 + (g % 5) as f64
+                } else {
+                    0.2 + 0.01 * (g % 7) as f64
+                };
+                let (mut k, mut q, l) = (0.0_f32, 1.0_f64, (-lam).exp());
+                loop {
+                    q *= rng.random::<f64>();
+                    if q <= l {
+                        break;
+                    }
+                    k += 1.0;
+                }
+                dense[i * h + g] = k;
+            }
+        }
+        let counts = CsrMatrix::from_dense_row_major(&dense, n, h);
+        let totals: Vec<f64> = (0..n)
+            .map(|i| {
+                dense[i * h..(i + 1) * h]
+                    .iter()
+                    .map(|&x| f64::from(x))
+                    .sum()
+            })
+            .collect();
+        let w: Vec<f64> = totals.iter().map(|&t| 1e6 / t).collect();
+        let (mut s1, mut s2) = (vec![0.0_f64; h], vec![0.0_f64; h]);
+        for i in 0..n {
+            for g in 0..h {
+                let y = f64::from(dense[i * h + g]) * w[i];
+                s1[g] += y;
+                s2[g] += y * y;
+            }
+        }
+        let nf = n as f64;
+        let mu: Vec<f64> = s1.iter().map(|x| x / nf).collect();
+        let sd: Vec<f64> = s2
+            .iter()
+            .zip(&mu)
+            .map(|(q, m)| (q / nf - m * m).max(0.0).sqrt().max(1e-300))
+            .collect();
+        let m: Vec<f64> = mu.iter().zip(&sd).map(|(a, b)| a / b).collect();
+        let (vl, _) =
+            top_components_lanczos(&counts, &w, &sd, &m, p, 3).expect("Lanczos converges");
+        let vd = top_components_dense(&counts, &w, &sd, &m, p).unwrap();
+        let proj = |v: &[f64], a: usize, b: usize| {
+            (0..p).map(|j| v[a * p + j] * v[b * p + j]).sum::<f64>()
+        };
+        let mut worst = 0.0_f64;
+        for a in 0..h {
+            for b in 0..h {
+                worst = worst.max((proj(&vl, a, b) - proj(&vd, a, b)).abs());
+            }
+        }
+        // The dense route rounds the scaled counts to f32 before its Gram
+        // matrix (2.4e-8 here); Lanczos keeps them in f64.
+        assert!(worst < 1e-7, "projectors differ by {worst}");
+    }
+
+    /// The blocked search returns what sorting every distance returns, over
+    /// several tiles and point blocks, with duplicate points (exact ties).
+    #[test]
+    fn exact_neighbours_match_brute_force() {
+        let (n, d, k) = (4_500, 6, 25);
+        let mut rng = ChaCha8Rng::seed_from_u64(5);
+        let mut p: Vec<f32> = (0..n * d).map(|_| rng.random::<f32>()).collect();
+        for i in (0..n).step_by(97) {
+            let (a, b) = (i * d, ((i + 1) % n) * d);
+            for t in 0..d {
+                p[b + t] = p[a + t];
+            }
+        }
+        let fast = knn_exact(&p, n, d, k);
+        let norms: Vec<f32> = p
+            .chunks_exact(d)
+            .map(|r| r.iter().map(|x| x * x).sum())
+            .collect();
+        for i in (0..n).step_by(37) {
+            let mut all: Vec<(f32, u32)> = (0..n)
+                .filter(|&j| j != i)
+                .map(|j| {
+                    let dot: f32 = (0..d).map(|t| p[i * d + t] * p[j * d + t]).sum();
+                    (norms[i] + norms[j] - 2.0 * dot, j as u32)
+                })
+                .collect();
+            all.sort_unstable_by(by_distance);
+            let want: Vec<u32> = all[..k].iter().map(|c| c.1).collect();
+            // The product's rounding can reorder exact near-ties; compare sets.
+            let got = fast[i * k..(i + 1) * k].to_vec();
+            let (mut w, mut g) = (want.clone(), got.clone());
+            w.sort_unstable();
+            g.sort_unstable();
+            let same = w.iter().zip(&g).filter(|(a, b)| a == b).count();
+            assert!(same + 1 >= k, "query {i}: {got:?} vs {want:?}");
+        }
     }
 
     #[test]
