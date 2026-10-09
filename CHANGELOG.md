@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.1 (2026-10)
+
+Doublet detection (`ps.pp.scrublet`) is about ten times faster; nothing else changes.
+
+- The leading principal components of each batch come from a Lanczos iteration on the sparse counts
+  (full reorthogonalization, 1e-10 residual tolerance, seeded) in place of the dense eigendecomposition
+  of a genes-by-genes matrix, which took 90% of the time. The dense route remains for small batches
+  and as a fallback.
+- Batches are scored in parallel, the largest first, and the per-gene sums are freed before the last pass.
+- The exact neighbor search works in cache-sized blocks. Neighbors are now exact at every batch size
+  (`exact_knn_max` defaults to no limit; set it to use NN-descent above a size). NN-descent was slower at
+  every size measured, because Scrublet's neighbor count grows with the square root of the batch.
+- Measured on 443,797 cells of the scTab atlas in 141 donor batches (8 cores): 240 s to 22 s, against
+  71 s for the reference Scrublet on 8 processes. Calls and thresholds equal those of 0.1.0, scores
+  differ at the rounding of 32-bit values, and results do not depend on the number of threads. Agreement
+  with the reference Scrublet is as close as the reference is to itself with another seed.
+
 ## 0.1.0 (2026-10)
 
 First public release.

@@ -110,7 +110,7 @@ __all__ = [
     "triple",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 # The active budget: what Polariseq may use. Detected from the machine on
 # first use and overridable with `set_budget`. Detection is lazy so that
