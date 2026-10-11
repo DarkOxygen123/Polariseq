@@ -22,14 +22,9 @@
 </p>
 
 Polariseq analyzes single-cell RNA-seq data from raw counts to clusters, UMAP, marker genes and comparisons between
-conditions. It is a Python package with a Rust core, and it plans before it reads: from a file's description alone it
-predicts the memory and disk that every step will need, then runs the analysis in memory when the matrix fits and out of
-core when it does not. Both modes run the same steps with the same kernels, so an analysis started on a laptop carries on
-unchanged on a server.
-
-Atlases have grown to millions of cells, and Polariseq is built for that size. Counts stream from disk in blocks sized to
-the memory you allow, so a few million cells fit on an everyday computer and tens of millions on one server node, with
-the rest of the memory left free for your other work.
+conditions. It is a Python package with a Rust core that plans before it reads: from a file's description it predicts
+the memory and disk each step needs, then runs in memory when the matrix fits and out of core when it does not, with
+the same steps in both modes. A few million cells fit on an everyday computer and tens of millions on one server node.
 
 ## Optimizations
 
