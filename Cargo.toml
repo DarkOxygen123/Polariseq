@@ -8,13 +8,13 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.82"
 authors = ["Uthamkumar M <uthamkumar.work@gmail.com>", "Abhi Dutta", "Trayambak Basak <trayambak@iitmandi.ac.in>"]
 description = "Fast, memory-aware single-cell RNA-seq analysis, in memory or out of core"
 readme = "README.md"
-license = "GPL-3.0-or-later"
+license-file = "LICENSE"
 repository = "https://github.com/DarkOxygen123/Polariseq"
 homepage = "https://github.com/DarkOxygen123/Polariseq"
 documentation = "https://github.com/DarkOxygen123/Polariseq#readme"

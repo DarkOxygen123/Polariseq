@@ -14,7 +14,8 @@ from __future__ import annotations
 import numpy as np
 import polariseq as ps
 import pytest
-import scipy.sparse as sp
+
+sp = pytest.importorskip("scipy.sparse")
 
 scipy_h5py = pytest.importorskip("h5py")
 

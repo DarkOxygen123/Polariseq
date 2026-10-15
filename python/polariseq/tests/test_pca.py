@@ -15,7 +15,8 @@ from __future__ import annotations
 import numpy as np
 import polariseq as ps
 import pytest
-import scipy.sparse as sp
+
+sp = pytest.importorskip("scipy.sparse")
 
 FIXTURE_10K = "tests/data/medium_10kx2k.h5ad"
 

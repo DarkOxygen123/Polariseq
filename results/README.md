@@ -4,6 +4,14 @@ The measured tables of the Polariseq benchmarks, exported from the scripts'
 raw output (one JSON record per run, kept out of git for size). Machine
 details, the data and the commands are in [../REPRODUCE.md](../REPRODUCE.md).
 
+**Versions.** The runs of the current version, Polariseq 0.2.0, are in
+[`v020/`](#v020-the-runs-of-polariseq-020): the laptop series, the budget
+sweep, the compute-node runs and the Windows series. The folders after it hold
+the earlier campaigns, made with Polariseq 0.1.0b1 to 0.1.1 (each run table has
+a `version_polariseq` column), and the other tools' runs, which did not change.
+Where a measurement is in both, the `v020/` table is the current one. The
+22.2-million-cell atlas run (`atlas_22m/`) was made with 0.1.x.
+
 Dataset names used throughout: `pbmc3k`, `pbmc10k`, `neuron10k`, `pbmc20k`
 (public 10x sets), `brain50k` ... `brain1306k` (subsets of the 10x 1.3M mouse
 brain file, seed 0), `fetal1000k`, `fetal2000k`, `fetal4062k` (the human fetal
@@ -15,6 +23,24 @@ file), `seurat-tuned`, `seurat-bpcells`, `bpcells-native`, `scarf`.
 
 Times are in seconds and memory in GB (10^9 bytes) unless a column says
 otherwise.
+
+## v020/: the runs of Polariseq 0.2.0
+
+| file | rows | what | from |
+|---|---:|---|---|
+| `laptop_runs.csv` | 103 | the laptop series (MacBook Air M2, 8 GB, 4 threads, 6 GB budget): every dataset in memory and out of core, quality control through clustering, no UMAP; the columns of the run tables below | `relicence/laptop_series_v020.py`, `export_tables.py` |
+| `laptop_runs_with_umap.csv` | 7 | the timed laptop runs with UMAP at 1.3M and 4.06M cells | `relicence/laptop_v020.py` |
+| `laptop_budget_sweep_brain800k.csv` | 6 | out of core on 800,000 brain cells at budgets of 1, 2, 3, 4, 6 and 8 GB; budgets below the planner's floor are declined (status failed) | `relicence/laptop_series_v020.py` |
+| `windows_runs.csv` | 61 | the same series on a Windows laptop | `relicence/windows_series_v020.py` |
+| `platforms.csv` | 24 | the macOS and Windows series side by side: time, memory, and the agreement of the clusters between the two laptops | from the two run tables |
+| `planner_vs_measured.csv` | 16 | the peak the planning step predicts for each out-of-core laptop run against the measured peak resident memory | `relicence/planner_v020_check.py` |
+| `node_runs.csv` | 15 | one compute-node run per tool and dataset, four threads, UMAP where `with_umap_step` says so: Polariseq 0.2.0 in memory and out of core, and the other tools' runs (unchanged); time from quality control through clustering, UMAP, peak memory, clusters, the node's load at the start | `relicence/cluster/v020_*.sbatch`, `slurm/node_run.sbatch` |
+| `node_steps.csv` | 127 | the same runs step by step (begin, end and wall time of every step) | the run records |
+| `node_memory_over_time.csv.gz` | | resident memory of each node run over time, with the step it was in | the run records |
+| `node_agreement.csv` | 50 | agreement of the tools' clusters (adjusted Rand index) and selected genes (Jaccard) on the node runs | `relicence/v020_agreement.py` |
+
+Nodes and hosts are labelled `node A`, `host 1` and so on. The 0.2.0 runs record their version as
+`0.2.0.dev0`: the code of 0.2.0 before its version number was set.
 
 ## laptop/: MacBook Air M2, 8 GB, 4 threads
 

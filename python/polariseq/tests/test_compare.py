@@ -164,6 +164,7 @@ def test_ranking_against_a_reference_group_is_scanpys(sim):
 
 
 def test_comparison_plots_draw(sim):
+    pytest.importorskip("matplotlib")
     import matplotlib
 
     matplotlib.use("Agg")

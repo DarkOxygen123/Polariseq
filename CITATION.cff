@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use Polariseq, or results produced with it, please cite it as below, with the version you used."
+type: software
+title: "Polariseq: atlas-scale single-cell analysis on the computer you have"
+abstract: "Polariseq analyzes single-cell RNA-seq data from raw counts to clusters, UMAP, marker genes and comparisons between conditions. It plans the memory and disk of every step before reading the data, and runs in memory when the matrix fits and out of core when it does not."
+authors:
+  - given-names: Uthamkumar
+    family-names: M
+    email: uthamkumar.work@gmail.com
+  - given-names: Abhi
+    family-names: Dutta
+  - given-names: Trayambak
+    family-names: Basak
+    email: trayambak@iitmandi.ac.in
+version: 0.2.0
+date-released: 2026-10-16
+repository-code: "https://github.com/DarkOxygen123/Polariseq"
+url: "https://github.com/DarkOxygen123/Polariseq"
+license-url: "https://github.com/DarkOxygen123/Polariseq/blob/main/LICENSE"
+keywords:
+  - single-cell
+  - scRNA-seq
+  - out-of-core
+  - atlas
+  - clustering
+  - UMAP

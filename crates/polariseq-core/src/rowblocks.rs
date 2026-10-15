@@ -3,7 +3,7 @@
 //! Every kernel that loops over rows (QC, gene stats, sparse products,
 //! Gram matrix) runs on a [`RowBlocks`] source instead of a concrete
 //! matrix, so in-RAM, memory-mapped and (later) streamed-from-HDF5 inputs
-//! share one code path. The handbook contract:
+//! share one code path. The contract:
 //!
 //! - Blocks cover `rows_per_block` rows in row order; `f` receives the
 //!   global row offset and the block as a [`CsrRef`] with `indptr` rebased

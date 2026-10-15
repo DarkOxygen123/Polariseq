@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 import polariseq as ps
+import pytest
 
 FIXTURE = "tests/data/medium_10kx2k.h5ad"
 
@@ -39,7 +40,7 @@ class TestCanonicalPipeline:
         assert np.isfinite(Xd).all()
 
         # Sparse path: construct a CSR directly to test sparse log1p.
-        import scipy.sparse as sp
+        sp = pytest.importorskip("scipy.sparse")
 
         X = sp.csr_matrix(np.array([[1.0, 0.0, 2.0], [0.0, 3.0, 0.0]], dtype=np.float32))
         adata2 = ps.AnnData(X=X)

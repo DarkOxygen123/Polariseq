@@ -24,13 +24,19 @@ from typing import Any
 
 from polariseq.resources import Budget
 
-__all__ = ["StepCost", "Plan", "estimate", "max_cells", "store_bytes"]
+__all__ = ["StepCost", "Plan", "estimate", "max_cells", "store_bytes", "loads_inputs",
+           "neighbors_working_bytes", "leiden_working_bytes", "umap_working_bytes"]
 
 _GB = 1_000_000_000
 
-#: Steps whose cost is O(cells) and resident regardless of storage mode.
-#: When one of these limits a plan, changing storage will not help.
+#: Steps whose working memory is O(cells) whatever the storage mode. When one
+#: of these limits a plan, changing storage will not help.
 _GRAPH_STEPS = frozenset({"neighbors", "leiden", "umap"})
+#: Share of the memory free at the moment a graph step may fill with its
+#: inputs and working memory when it reads its inputs into memory (see
+#: :func:`loads_inputs`): the rest is left to the machine, whose other
+#: programs (a shared cluster node's other jobs) the budget knows nothing of.
+LIVE_FREE_FRACTION = 0.8
 
 # ── storage coefficients ────────────────────────────────────────────────
 #: CSR in RAM: f32 value + u32 column index per nonzero, u32 row pointer.
@@ -106,26 +112,62 @@ HVG_NNZ_ENRICHMENT = 1.4
 #: fuzzy set stores both directions of every edge, mutual pairs once.
 #: Measured 1.75 on the 4.06M-cell fetal atlas (105M entries at k = 15).
 FUZZY_ENTRY_FACTOR = 1.75
-#: NN-Descent's working memory per cell per neighbour, on top of the
-#: embedding: the output graph, the per-node and candidate heaps and the
-#: random-projection forest. Measured as the neighbours step's peak on the
-#: 4.06M-cell fetal atlas (4.36 GB above the embedding at k = 15); the
-#: itemised count of the heaps alone gives 49 B, 30% short.
-NNDESCENT_BYTES_PER_EDGE = 73
+#: NN-Descent's peak memory per cell, above the embedding, at 15 neighbours:
+#: a part that does not depend on the threads and one per thread,
+#: ``NNDESCENT_BYTES_PER_CELL + NNDESCENT_BYTES_PER_CELL_PER_THREAD * threads``.
+#:
+#: Fitted on real data, not derived: `pp.neighbors` (0.2.0) on random slices
+#: of the 95.6M-cell Tahoe-100M embedding on a compute node
+#: (`benchmarks/relicence/neighbors_memory.py` on the reproduce branch), anonymous memory less the
+#: embedding: 20M cells at 4, 8, 12 and 16 threads 669, 673, 692 and 676 bytes
+#: per cell (the line through them 667 + 1.0 per thread), 40M at 16 threads
+#: 668, all 95.6M at 16 threads 655 (the embedding read in place there). Set a
+#: little above the line, so it plans at or above every measurement: 692 at
+#: 12 threads on 20M, 3 to 7% above the others. Raised to 780 on 2026-10-15:
+#: in the full analyses of the 1.3M-cell mouse brain the step held 1.72 GB on
+#: Windows (planned 1.65 at 680) and on the 4.0M-cell fetal atlas 4.77 GB, so
+#: it is set 3% above the higher of the two; on the bare runs above it plans
+#: 9 to 17% high.
+#:
+#: Until 0.2.0 the forest's construction set the peak, 548 + 68 per thread
+#: (1,636 bytes per cell at 16 threads, 156 GB at 95.6M cells): each thread
+#: copied the rows of the subtree it split, and random hyperplanes split
+#: unevenly, so a copy could hold half the cells. Subtrees above 2^20 points
+#: are now split in place (`nndescent.rs`, ``GATHER_MAX``), the same graph bit
+#: for bit, and the threads hardly matter.
+NNDESCENT_BYTES_PER_CELL = 780
+NNDESCENT_BYTES_PER_CELL_PER_THREAD = 1
+#: Neighbours the fit was made at. The heaps and candidate lists grow with
+#: the number of neighbours, so more is charged in proportion; fewer is not
+#: credited, the forest part not depending on it.
+NNDESCENT_FIT_NEIGHBORS = 15
 #: Leiden's working memory per connectivity entry: the copy of the graph the
 #: core owns (8 B), vertex and community strengths, and the first aggregated
 #: graph. Measured 31 B from the clustering step's peak on the same atlas
 #: (after 2026-09-28, when the core stopped rebuilding and cloning the graph;
-#: it was ~66 B before).
-LEIDEN_BYTES_PER_ENTRY = 31
+#: it was ~66 B before). Raised to 33 on 2026-10-15, 3% above 0.2.0's
+#: largest (the 4.0M-cell fetal atlas in example 06 on Windows: 5.33 GB).
+LEIDEN_BYTES_PER_ENTRY = 33
 #: faer's dense symmetric eigendecomposition allocates several workspaces on
 #: top of the covariance matrix it is given. Measured on heart_10k by timing
 #: PCA alone at a few HVG counts: 6.2x the Gram matrix at n_hvg=1000, 5.7x at
 #: 2000, 4.0x at 3000 (the spread is high-water-mark noise at small sizes).
 #: The largest is used deliberately — for a budget, over-predicting memory
 #: means declining a run that would have fit, while under-predicting means
-#: swapping, which is far worse.
-GRAM_EIGEN_WORKSPACE_FACTOR = 6.0
+#: swapping, which is far worse. Raised to 8 on 2026-10-15: the run's own
+#: resident memory on PBMC 3k (2,700 cells, where PCA's fixed part is all
+#: there is) rose by 0.28 GB in PCA, the Gram matrix with its partial sum
+#: (2 x 32 MB) and about 8 x 32 MB for the eigendecomposition, its
+#: eigenvectors and workspace.
+GRAM_EIGEN_WORKSPACE_FACTOR = 8.0
+#: How the Gram matrix of exact PCA is summed (`rsvd::gram_matrix_blocks`,
+#: chunks of `rsvd::chunk_rows`: max(n / 32, 32,768) rows): one n_hvg^2 f64
+#: partial per chunk, all kept until they are merged in order, so up to 33
+#: matrices of 32 MB at 2,000 genes (1.06 GB) above a million cells. Missing
+#: from the model until 2026-10-15: PCA on the 1.3M-cell mouse brain measured
+#: 3.05 GB on Windows and 2.79 GB on the Mac, against 1.97 GB planned.
+GRAM_CHUNKS_MAX = 32
+GRAM_CHUNK_MIN_ROWS = 32_768
 #: Blocks read ahead by `H5adStream` (its `PREFETCH`).
 STREAM_PREFETCH = 4
 #: The gene-statistics pass of HVG selection transforms each block (scaled,
@@ -145,19 +187,45 @@ HVG_INFLIGHT_FACTOR = 1.6
 #: densest file, so the planner charges the in-flight blocks at the densest
 #: file's density times this headroom, when the files' shapes are known. With
 #: it the plan is 39.2 and 20.8 GB, against those two measurements. One
-#: dataset's worth of evidence, so a prediction, not a bound.
-BLOCK_DENSITY_HEADROOM = 1.2
+#: dataset's worth of evidence, so a prediction, not a bound. Raised to 1.25 on
+#: 2026-10-15: at 1.2 the 8-thread run (39.37 GB) was planned at 39.35 GB.
+BLOCK_DENSITY_HEADROOM = 1.25
 #: PCA's per-cell working memory: the scores and the buffers behind them,
 #: about 25 bytes per cell per component. Measured 1.27 KB per cell at 50
 #: components on 2.2M cells (2.81 GB) and 1.28 KB on 22.1M cells (28.4 GB),
 #: against the 0.4 KB the planner had charged (an embedding and one projection).
-PCA_BYTES_PER_CELL_PER_PC = 25
+#: Set to 26 on 2026-10-15, with the Gram matrix's partial sums now counted
+#: apart (GRAM_CHUNKS_MAX): the 1.3M-cell mouse brain's PCA (3.05 GB on
+#: Windows) is then planned 4% above, the 22.1M-cell atlas's 12% above.
+PCA_BYTES_PER_CELL_PER_PC = 26
 #: UMAP's working memory per connectivity entry (edge list, per-edge SGD
-#: schedules, the layout's buffers). Measured at about 800 bytes per cell at
-#: 15 neighbours on 2.2M cells (1.80 GB above the resident structures) and on
-#: 22.1M (17.5 GB), 31 bytes for each of the 26 entries per cell; the planner
-#: had charged 12 + 12 bytes per entry for half of them.
-UMAP_BYTES_PER_ENTRY = 31
+#: schedules, the layout's buffers, the multilevel start's arrays).
+#:
+#: Refitted for 0.2.0 (2026-10-14) from every run of the final build, with the
+#: inputs counted as the planner now counts them (LOADED_INPUT_COPIES, the
+#: embedding the multilevel start reads, OBS_BYTES_PER_CELL): the UMAP phase
+#: on the 4.0M-cell fetal atlas implied 41 bytes per entry in example 06 on
+#: Windows, 37 to 38 on a compute node at 4 and 8 threads, 35 in the Windows benchmark
+#: and 31 on the Mac (inputs read in place); on the 1.3M-cell mouse brain 22
+#: to 35. Set to 44, 3% above the largest of them. (The Mac's mouse-brain UMAP
+#: phase, 3.1 to 3.6 GB, is memory macOS kept from gene selection, not
+#: UMAP's.) Until 0.2.0: 31, from 2.2M and 22.1M cells with the inputs not
+#: counted.
+UMAP_BYTES_PER_ENTRY = 44
+#: How many times resident memory holds a graph step's inputs when the step
+#: reads them into memory: its copy, and the pages of the file the step before
+#: wrote, which stay resident. Measured on Tahoe-100M's neighbours (0.2.0,
+#: embedding read into memory): 99.5 GB resident against 81.8 GB anonymous,
+#: the difference (17.7 GB) the embedding's file (19.1 GB). Those pages are
+#: clean and the system can drop them, but they count in resident memory and
+#: in Windows' working set, which is what the plan predicts.
+LOADED_INPUT_COPIES = 2
+#: What the run holds in Python for each cell while the graph steps work: the
+#: cell names and the quality-control columns of ``obs``. The residual of
+#: neighbours and Leiden over the plan in 0.2.0's full analyses: 0.2 to 0.3 GB
+#: on the 4.0M-cell fetal atlas (Windows and Mac), 0.16 GB on the 1.3M-cell
+#: mouse brain (Windows), about 60 bytes per cell.
+OBS_BYTES_PER_CELL = 64
 #: Share of the RAM budget the in-flight row blocks may occupy. They are pure
 #: working space, so they must not crowd out the structures the step needs.
 BLOCK_BUDGET_FRACTION = 0.25
@@ -165,8 +233,37 @@ BLOCK_BUDGET_FRACTION = 0.25
 #: in the Python glue, allocator fragmentation, and the extension's own
 #: working set. Measured as the residual between predicted and actual peak RSS
 #: on heart_10k and heart_100k (~0.15 GB on both, i.e. flat). Without it the
-#: model is accurate at scale but under-predicts small runs by ~2x.
-PROCESS_OVERHEAD_BYTES = 150_000_000
+#: model is accurate at scale but under-predicts small runs by ~2x. Raised to
+#: 0.30 GB on 2026-10-15, measured again the same way: the process holds 0.13 GB
+#: once Polariseq, NumPy, SciPy and anndata are imported, and on the four
+#: smallest datasets (2,700 to 23,837 cells, five runs each) the peaks varied
+#: by up to 0.12 GB between runs of one dataset (PBMC 10k: 0.79 to 0.91 GB);
+#: the constant is set so that every one of those runs is planned at least 3%
+#: above its peak.
+PROCESS_OVERHEAD_BYTES = 300_000_000
+#: In memory, what reading the file holds above the matrix (the reader's
+#: buffers and the cell names). Measured with 0.2.0 on a compute node: 0.42 GB on the
+#: 1.3M-cell mouse brain, 0.34 GB on the 4.06M-cell fetal atlas; set at 0.8 GB.
+IN_MEMORY_READ_BYTES = 800_000_000
+#: In memory, quality control's per-cell results, built in Python and kept.
+#: Measured with 0.2.0 on a compute node above the matrix and the read: 0.65 GB on
+#: 1.3M cells (500 bytes per cell), 1.44 GB on 4.06M (355); set at 600.
+QC_BYTES_PER_CELL = 600
+#: In memory, bytes per stored value of the chunks the transform views write
+#: while they are read, one chunk per thread (gene selection and the
+#: renormalization over the selected genes). Measured with 0.2.0 on a compute node, in
+#: memory at 4 threads: gene selection held 3.63 GB above the matrix on the
+#: 1.3M-cell mouse brain and 2.68 GB on the 4.06M-cell fetal atlas, chunks of
+#: about 82 million values each (11 and 8 bytes per value in flight); set
+#: at 12. At 8 threads the fetal atlas held less (2.43 GB), so no more than
+#: IN_MEMORY_VIEW_CHUNKS_MAX chunks are charged, however many threads run.
+IN_MEMORY_VIEW_BYTES_PER_NNZ = 12
+IN_MEMORY_VIEW_CHUNKS_MAX = 4
+#: In memory, how many copies of the selected genes the run holds from PCA on.
+#: Measured with 0.2.0 on a compute node: the graph steps held 0.7 to 1.05 GB more than
+#: one copy and the process (4.06M fetal cells, one copy 0.93 GB; 1.3M brain
+#: cells, one copy 2.1 GB).
+IN_MEMORY_HVG_COPIES = 2
 #: Bounds on the derived block size: small enough to bound memory, large
 #: enough that per-block overhead and I/O syscalls stay negligible.
 MIN_ROWS_PER_BLOCK = 1_024
@@ -175,6 +272,48 @@ MAX_ROWS_PER_BLOCK = 32_768
 
 def _csr_bytes(nnz: int, n_rows: int) -> int:
     return CSR_BYTES_PER_NNZ * nnz + CSR_BYTES_PER_ROW * (n_rows + 1)
+
+
+def neighbors_working_bytes(n_cells: int, n_neighbors: int, threads: int) -> int:
+    """NN-Descent's working memory above the embedding (fitted, see
+    ``NNDESCENT_BYTES_PER_CELL``), with the distance graph it returns."""
+    per_cell = (NNDESCENT_BYTES_PER_CELL + NNDESCENT_BYTES_PER_CELL_PER_THREAD * max(1, threads)) * max(
+        1.0, n_neighbors / NNDESCENT_FIT_NEIGHBORS
+    )
+    return int(n_cells * per_cell)
+
+
+def leiden_working_bytes(entries: int) -> int:
+    """Leiden's working memory above the connectivity graph it clusters."""
+    return entries * LEIDEN_BYTES_PER_ENTRY
+
+
+def umap_working_bytes(entries: int, n_cells: int) -> int:
+    """UMAP's working memory above the connectivity graph: the edge list, the
+    per-edge schedules, the layout's buffers, and the 2-D layout."""
+    return entries * UMAP_BYTES_PER_ENTRY + n_cells * 8
+
+
+def loads_inputs(held: int, inputs: int, working: int, budget_bytes: int,
+                 available: int | None = None) -> bool:
+    """Whether a graph step reads its inputs (the embedding, a graph) into
+    memory before it starts, or reads them in place from the project's files.
+
+    The steps read their inputs in random order. In memory that costs nothing;
+    in place every page not in the cache is fetched on its own, which a local
+    disk does in a fraction of a millisecond and a network file system (a
+    cluster's scratch space) in a round trip each: Tahoe-100M's neighbours and
+    Leiden ran at 0.03 to 0.2 cores for hours whenever the node dropped the
+    cached pages. So the inputs are read into memory, in one sequential pass,
+    whenever the run (``held``), the inputs and the step's working memory fit
+    the budget, and, when ``available`` (memory free now) is given, the inputs
+    and the working memory fit ``LIVE_FREE_FRACTION`` of it. Otherwise they
+    are read in place and the budget is spared their size; from a network
+    file system they are first copied to a local disk when one has room (see
+    ``_results.graph_inputs``)."""
+    if held + inputs + working > budget_bytes:
+        return False
+    return available is None or inputs + working <= LIVE_FREE_FRACTION * available
 
 
 #: The compact layout new stores are written in (byte planes deflated per
@@ -220,6 +359,11 @@ class StepCost:
     resident: int
     transient: int
     note: str = ""
+    #: For the graph steps: where their inputs are read from, ``"loaded"``
+    #: (into memory first; counted twice in ``resident``, the copy and the
+    #: file's pages) or ``"mapped"`` (in place from the project's files; their
+    #: pages counted once).
+    inputs: str = ""
 
     @property
     def peak(self) -> int:
@@ -301,6 +445,7 @@ class Plan:
             "fits": self.fits,
             "limiting_step": self.limiting_step,
             "steps": {s.name: round(s.peak / _GB, 3) for s in self.steps},
+            "graph_inputs": {s.name: s.inputs for s in self.steps if s.inputs},
             "warnings": list(self.warnings),
             "disk_gb": {k: round(v / _GB, 3) for k, v in self.disk.items()},
             "disk_peak_gb": round(self.disk_peak_gb, 3),
@@ -352,9 +497,9 @@ class Plan:
                                     for k, v in self.disk.items()))
         if self.limiting_step in _GRAPH_STEPS:
             verdict += (
-                f"\n  note: the limit is the '{self.limiting_step}' stage, which is "
-                "O(cells) and always in RAM — a different storage mode will not "
-                "help; reduce cells or n_neighbors"
+                f"\n  note: the limit is the '{self.limiting_step}' stage, whose working "
+                "memory grows with the cells whatever the storage mode — a different "
+                "storage mode will not help; reduce cells or n_neighbors"
             )
         warn = "".join(f"\n  ! {w}" for w in self.warnings)
         return f"{head}{rows}\n{verdict}{warn}"
@@ -373,6 +518,7 @@ def estimate(
     with_umap: bool = True,
     n_files: int = 1,
     densest_nnz_per_row: int | None = None,
+    network_project: bool = False,
 ) -> Plan:
     """Cost the standard pipeline for a dataset of this shape.
 
@@ -391,6 +537,9 @@ def estimate(
             flight, and when the files differ in density the densest blocks
             hold more than the average; given this, that pass is charged at
             the densest file's density (see ``BLOCK_DENSITY_HEADROOM``).
+        network_project: The project folder is on a network file system.
+            A graph step that would read its inputs in place from there is
+            warned about, with the budget that reads them into memory.
 
     Returns:
         A :class:`Plan`. Note it is a *prediction*: the estimate is built from
@@ -524,7 +673,7 @@ def estimate(
         StepCost(
             "load",
             resident,
-            block_bytes + (ram_bytes if merging else 0),
+            block_bytes + (ram_bytes if merging else 0) + (IN_MEMORY_READ_BYTES if storage == "ram" else 0),
             "streamed in blocks" if storage == "spill" else
             (f"{n_files} files merged: the rows and the merged matrix both alive"
              if merging else ""),
@@ -534,7 +683,12 @@ def estimate(
     # QC: per-thread gene accumulators (u32 counts + f64 totals) and the
     # per-cell outputs (f32 counts, u32 genes).
     qc_transient = threads * n_genes * (4 + 8) + n_cells * (4 + 4)
+    if storage == "ram":
+        # The per-cell results are built in Python, and they stay.
+        qc_transient += n_cells * QC_BYTES_PER_CELL
     steps.append(StepCost("qc", resident, qc_transient + block_bytes))
+    if storage == "ram":
+        resident += n_cells * QC_BYTES_PER_CELL
 
     # normalize_total + log1p rewrite values in place.
     steps.append(StepCost("normalize+log1p", resident, block_bytes, "in place"))
@@ -543,13 +697,20 @@ def estimate(
     # which the original and the subset are both alive. This is usually the
     # peak of the whole run.
     nnz_hvg = min(nnz, int(nnz * (n_hvg / max(1, n_genes)) * HVG_NNZ_ENRICHMENT))
+    # In memory, the transforms (normalization, log, the statistics' squares)
+    # are views that write each chunk's transformed values (chunks of
+    # max(n / 32, 32,768) rows, `rsvd::chunk_rows`), one chunk per thread.
+    view_chunks = min(GRAM_CHUNKS_MAX, max(1, -(-n_cells // GRAM_CHUNK_MIN_ROWS)))
+    in_memory_views = int(min(threads, view_chunks, IN_MEMORY_VIEW_CHUNKS_MAX) * (nnz / view_chunks)
+                          * IN_MEMORY_VIEW_BYTES_PER_NNZ)
     hvg_matrix = _csr_bytes(nnz_hvg, n_cells)
     steps.append(
         StepCost(
             "hvg",
             resident,
             threads * n_genes * 16
-            + (int(dense_block_bytes * HVG_INFLIGHT_FACTOR) if storage == "spill" else block_bytes),
+            + (int(dense_block_bytes * HVG_INFLIGHT_FACTOR) if storage == "spill"
+               else block_bytes + in_memory_views),
             "gene statistics"
             + (f", blocks at {dense_per_row:,} values per cell (densest file)"
                if dense_per_row > nnz_per_row else ""),
@@ -566,53 +727,94 @@ def estimate(
             StepCost(
                 "hvg subset",
                 resident,
-                hvg_matrix,
-                f"original + {n_hvg}-gene subset both alive",
+                hvg_matrix + in_memory_views,
+                f"original + {n_hvg}-gene subset both alive, renormalized through views",
             )
         )
-        # After subsetting, the working matrix is the HVG one (the runtime
-        # overhead is still there too).
-        working = hvg_matrix + PROCESS_OVERHEAD_BYTES
+        # After subsetting, the run holds the selected genes twice (see
+        # IN_MEMORY_HVG_COPIES) and the runtime overhead.
+        working = IN_MEMORY_HVG_COPIES * hvg_matrix + PROCESS_OVERHEAD_BYTES
 
     # PCA: the Gram path holds an n_hvg^2 f64 covariance plus faer's
     # eigendecomposition workspace (~the same again), and the scores with the
     # buffers behind them (measured per cell, see PCA_BYTES_PER_CELL_PER_PC).
     if n_hvg <= 4096:
         gram = n_hvg * n_hvg * 8
-        pca_transient = int(GRAM_EIGEN_WORKSPACE_FACTOR * gram) + (
+        # The Gram matrix is summed per chunk of rows, and every chunk's
+        # partial is kept until all are merged in order (`gram_matrix_blocks`,
+        # `BlockFold`): GRAM_CHUNKS_MAX chunks of at least GRAM_CHUNK_MIN_ROWS
+        # rows, each partial one n_hvg^2 f64 matrix, plus the sum.
+        chunks = min(GRAM_CHUNKS_MAX, max(1, -(-n_cells // GRAM_CHUNK_MIN_ROWS)))
+        pca_transient = int(GRAM_EIGEN_WORKSPACE_FACTOR * gram) + (chunks + 1) * gram + (
             n_cells * n_pcs * PCA_BYTES_PER_CELL_PER_PC
         )
-        pca_note = f"exact Gram ({n_hvg}^2 f64 + eigen workspace)"
+        pca_note = (f"exact Gram ({n_hvg}^2 f64, {chunks} partial sums kept until merged, "
+                    "+ eigen workspace)")
     else:
         krylov = n_cells * (n_pcs + 10) * 5 * 4
         pca_transient = krylov + 2 * n_cells * n_pcs * 4
         pca_note = "randomized block Krylov"
-    steps.append(StepCost("pca", working, pca_transient, pca_note))
+    # From PCA on, the run also holds the per-cell annotations in Python.
+    pca_resident = working + n_cells * OBS_BYTES_PER_CELL
+    if storage == "ram":
+        # In memory, the full matrix is released as PCA starts, not before it:
+        # on Windows the step began with the matrix and the selected genes
+        # still resident (fetal 1M cells: 5.42 GB at its start, 0.94 GB at
+        # its end), so the step is planned at no less than that.
+        pca_resident = max(pca_resident, resident + hvg_matrix - pca_transient)
+    steps.append(StepCost("pca", pca_resident, pca_transient, pca_note))
 
     # From here the matrix is not needed: the graph stages work on the
     # embedding. Callers that keep `adata.X` alive pay `working` as well, so
-    # it stays in `resident`.
+    # it stays in `resident`. The embedding and the graphs are files of the
+    # project, not held between steps; each graph step reads what it needs
+    # into memory when it fits (`loads_inputs`, the rule the run applies) and
+    # in place otherwise.
     emb = n_cells * n_pcs * 4
-
-    # kNN: NN-Descent's working memory (measured, see the constant), which
-    # includes the distance graph it returns.
     graph = n_cells * n_neighbors * 8
-    steps.append(StepCost("neighbors", working + emb,
-                          n_cells * n_neighbors * NNDESCENT_BYTES_PER_EDGE, "NN-Descent"))
-
-    # The connectivity CSR (u32 index + f32 weight per entry) is held from
-    # here on, beside the distance graph; Leiden clusters it as given.
+    # The connectivity CSR (u32 index + f32 weight per entry): the fuzzy set
+    # stores both directions of every edge, mutual pairs once.
     entries = int(n_cells * n_neighbors * FUZZY_ENTRY_FACTOR)
     conn = entries * 8
-    steps.append(StepCost("leiden", working + emb + graph + conn,
-                          entries * LEIDEN_BYTES_PER_ENTRY))
 
+    # What the graph steps hold besides their inputs: the run (`working`) and
+    # the per-cell annotations kept in Python (see OBS_BYTES_PER_CELL).
+    held = working + n_cells * OBS_BYTES_PER_CELL
+
+    def graph_step(name: str, inputs: int, transient: int, what: str, also_read: int = 0) -> None:
+        # Resident memory counts the inputs once when they are read in place
+        # (their pages) and twice when they are read into memory: the copy,
+        # and the pages of the file the step before wrote, which stay
+        # resident (see LOADED_INPUT_COPIES). The decision itself is the run's
+        # rule, unchanged.
+        loaded = loads_inputs(working, inputs, transient, budget.ram_bytes)
+        how = (f"{what} read into memory ({inputs / _GB:.2f} GB)" if loaded
+               else f"{what} read in place from the project ({inputs / _GB:.2f} GB)")
+        note = f"NN-Descent forest at {threads} threads; {how}" if name == "neighbors" else how
+        copies = LOADED_INPUT_COPIES if loaded else 1
+        steps.append(StepCost(name, held + copies * inputs + also_read, transient, note,
+                              inputs="loaded" if loaded else "mapped"))
+
+    # kNN: NN-Descent's working memory (fitted, see the constants): the
+    # forest's construction, which depends on the threads, sets the peak, and
+    # it includes the distance graph the step returns.
+    graph_step("neighbors", emb, neighbors_working_bytes(n_cells, n_neighbors, threads), "embedding")
+    graph_step("leiden", conn, leiden_working_bytes(entries), "graph")
     if with_umap:
         # The fuzzy edge list, the per-edge SGD schedules and the layout's
         # buffers, per connectivity entry (measured, see UMAP_BYTES_PER_ENTRY),
-        # and the 2-D embedding.
-        umap_transient = entries * UMAP_BYTES_PER_ENTRY + n_cells * 8
-        steps.append(StepCost("umap", working + emb + graph + conn, umap_transient))
+        # and the 2-D embedding. The multilevel start also reads the whole
+        # embedding in place, for its k-means groups.
+        graph_step("umap", conn, umap_working_bytes(entries, n_cells), "graph", also_read=emb)
+    if network_project:
+        in_place = [s for s in steps if s.inputs == "mapped"]
+        if in_place:
+            need = max(s.peak + (emb if s.name == "neighbors" else conn) for s in in_place)
+            warnings.append(
+                f"{', '.join(s.name for s in in_place)} would read their inputs in place from the "
+                f"project folder, on a network file system, where that can stall for hours (unless a "
+                f"local disk has room for a copy); a budget of {need / _GB:.1f} GB reads them into memory"
+            )
 
     # The working-set floor, spill mode only. Sizing ties the in-flight block
     # term to a fixed share of the budget (block_bytes ≈

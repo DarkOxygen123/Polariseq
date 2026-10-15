@@ -77,37 +77,66 @@ ACCENT_2 = _wash("#CC3311", 0.25)       # secondary series (soft brick)
 CONTINUOUS_CMAP = "cividis"
 
 
+def _plt():
+    """``matplotlib.pyplot``, which only the plotting functions need (the ``plot`` extra)."""
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        raise ImportError(
+            "Polariseq's plots need Matplotlib, which is not installed. Install it with: pip install matplotlib "
+            '(or the extra, pip install "polariseq[plot] @ git+https://github.com/DarkOxygen123/Polariseq.git")'
+        ) from None
+    return plt
+
+
 def _soft_cmap(colors: list[str], name: str):
+    _plt()  # the same message as the plots when Matplotlib is missing
     from matplotlib.colors import LinearSegmentedColormap
     return LinearSegmentedColormap.from_list(name, colors)
 
 
-SEQ_CMAP = _soft_cmap(
-    [_wash("#0077BB", 0.55), _wash("#0077BB", 0.30), _wash("#0077BB", 0.05)],
-    "polariseq_seq")
-DIV_CMAP = _soft_cmap(
-    [_wash("#3A5F8A", 0.10), "#FFFFFF", _wash("#B0554A", 0.10)],
-    "polariseq_div")
-DOT_CMAP = _soft_cmap(
-    ["#F3F1EE", _wash("#CC6655", 0.45), _wash("#A63D2F", 0.05)],
-    "polariseq_dot")
+# The colour maps are built on first use, so that importing Polariseq does not need Matplotlib.
+# `_cmap("SEQ_CMAP")` inside this module; `plotting.SEQ_CMAP` from outside (module __getattr__).
+_CMAP_SPECS = {
+    "SEQ_CMAP": (
+        [_wash("#0077BB", 0.55), _wash("#0077BB", 0.30), _wash("#0077BB", 0.05)],
+        "polariseq_seq"),
+    "DIV_CMAP": (
+        [_wash("#3A5F8A", 0.10), "#FFFFFF", _wash("#B0554A", 0.10)],
+        "polariseq_div"),
+    "DOT_CMAP": (
+        ["#F3F1EE", _wash("#CC6655", 0.45), _wash("#A63D2F", 0.05)],
+        "polariseq_dot"),
+    #: Gene expression on an embedding. Not SEQ_CMAP, which runs washed-blue to
+    #: saturated-blue: in scRNA-seq most cells are at or near zero for any given
+    #: gene, so a ramp that starts at a *colour* spends most of its range on the
+    #: cells that carry no signal and leaves little contrast for the ones that
+    #: do. This starts at a near-background neutral so zero recedes, then climbs
+    #: through warm mid-tones to a saturated end — the expressing cells are what
+    #: the eye lands on, which is the entire point of a marker plot.
+    "EXPR_CMAP": (
+        ["#EFF1F4", "#CBD9E8", "#7FA8D4", "#3E6FB0", "#7A4A9C", "#8C2F62"],
+        "polariseq_expr"),
+    #: The same ramp for dark backgrounds: it has to *start* dark or every
+    #: zero-expression cell becomes a bright dot on a black field.
+    "EXPR_CMAP_DARK": (
+        ["#20252C", "#2E4A6B", "#3E6FB0", "#5B8FD6", "#A87CC8", "#E86FA6"],
+        "polariseq_expr_dark"),
+}
+_CMAPS: dict[str, Any] = {}
 
-#: Gene expression on an embedding. Not SEQ_CMAP, which runs washed-blue to
-#: saturated-blue: in scRNA-seq most cells are at or near zero for any given
-#: gene, so a ramp that starts at a *colour* spends most of its range on the
-#: cells that carry no signal and leaves little contrast for the ones that
-#: do. This starts at a near-background neutral so zero recedes, then climbs
-#: through warm mid-tones to a saturated end — the expressing cells are what
-#: the eye lands on, which is the entire point of a marker plot.
-EXPR_CMAP = _soft_cmap(
-    ["#EFF1F4", "#CBD9E8", "#7FA8D4", "#3E6FB0", "#7A4A9C", "#8C2F62"],
-    "polariseq_expr")
 
-#: The same ramp for dark backgrounds: it has to *start* dark or every
-#: zero-expression cell becomes a bright dot on a black field.
-EXPR_CMAP_DARK = _soft_cmap(
-    ["#20252C", "#2E4A6B", "#3E6FB0", "#5B8FD6", "#A87CC8", "#E86FA6"],
-    "polariseq_expr_dark")
+def _cmap(key: str) -> Any:
+    if key not in _CMAPS:
+        _CMAPS[key] = _soft_cmap(*_CMAP_SPECS[key])
+    return _CMAPS[key]
+
+
+def __getattr__(name: str) -> Any:
+    if name in _CMAP_SPECS:
+        return _cmap(name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 #: The live theme. Sizes *and colours* — colours live here rather than in
 #: module constants precisely so a theme can change them; when they were
@@ -782,7 +811,7 @@ def _embedding(
     label_groups: list | None = None,
     callout_below: float = 0.02,
 ) -> Any:
-    import matplotlib.pyplot as plt
+    plt = _plt()
 
     if labels is not None and labels not in LABEL_STYLES + ("auto",):
         raise ValueError(f"labels={labels!r}: use one of {LABEL_STYLES + ('auto',)}")
@@ -1038,7 +1067,7 @@ def _split_embedding(adata, basis, color, split_by, *, ncols=None, figsize=None,
     """One panel per level of ``split_by`` (a condition, a donor): that
     level's cells coloured, every other cell in soft grey behind them, the
     colours shared by all panels."""
-    import matplotlib.pyplot as plt
+    plt = _plt()
     t = _THEME
     coords = np.asarray(adata.obsm[basis][:, :2], dtype=float)
     levels = _levels(adata.obs[split_by])
@@ -1084,7 +1113,7 @@ def _split_embedding(adata, basis, color, split_by, *, ncols=None, figsize=None,
 
 def _expr_cmap():
     """The expression ramp for the active theme."""
-    return EXPR_CMAP_DARK if _THEME["name"] == "dark" else EXPR_CMAP
+    return _cmap("EXPR_CMAP_DARK") if _THEME["name"] == "dark" else _cmap("EXPR_CMAP")
 
 
 def _data_aspect(coords: np.ndarray) -> float:
@@ -1108,7 +1137,7 @@ def _panel_grid(n: int, ncols: int | None, figsize, dpi, aspect: float | None = 
     UMAP in a near-square panel wastes most of the canvas vertically. Sizing
     the panel to the data removes it.
     """
-    import matplotlib.pyplot as plt
+    plt = _plt()
 
     ncols = ncols or min(n, 3 if n > 4 else 2 if n > 1 else 1)
     nrows = -(-n // ncols)
@@ -1137,7 +1166,7 @@ def _multi_embedding(adata, basis, colors, *, ncols=None, figsize=None,
     doing it by hand means building the grid, threading `ax=` through, and
     remembering to turn off the extra axes. Passing a list does it here.
     """
-    import matplotlib.pyplot as plt
+    plt = _plt()
 
     coords = np.asarray(adata.obsm[basis][:, :2], dtype=float)
     fig, axes = _panel_grid(len(colors), ncols, figsize, dpi,
@@ -1214,7 +1243,7 @@ def pca(
 def pca_variance_ratio(adata: AnnData, ax: Any | None = None, show: bool = True,
                        save: str | None = None, n_comps: int = 30, **kw) -> Any:
     """Variance explained per PC + cumulative curve on one calm axis."""
-    import matplotlib.pyplot as plt
+    plt = _plt()
     t = _THEME
     vr = np.asarray(adata.uns["pca"]["variance_ratio"], dtype=float)[:n_comps]
     x = np.arange(1, len(vr) + 1)
@@ -1378,7 +1407,7 @@ def violin(
             raise ValueError("split_by needs a groupby")
         return _split_violin(adata, [keys] if isinstance(keys, str) else list(keys), groupby,
                              split_by, ax=ax, show=show, save=save, **kw)
-    import matplotlib.pyplot as plt
+    plt = _plt()
     t = _THEME
     title = kw.pop("title", None)
     subtitle = kw.pop("subtitle", None)
@@ -1460,7 +1489,7 @@ def violin(
 def _split_violin(adata: AnnData, keys: list[str], groupby: str, split_by: str, *,
                   ax: Any | None = None, show: bool = True, save: str | None = None,
                   **kw) -> Any:
-    import matplotlib.pyplot as plt
+    plt = _plt()
     from matplotlib.patches import Patch
     t = _THEME
     groups = _levels(adata.obs[groupby])
@@ -1544,7 +1573,7 @@ def volcano(result: Any, group: str | None = None, *, condition: str | None = No
     ``|log2 fold change| >= min_log2_fold_change``) are coloured, up and
     down, and the most significant are named.
     """
-    import matplotlib.pyplot as plt
+    plt = _plt()
     t = _THEME
     table = _result_table(result, key)
     gcol = table.columns[0]
@@ -1600,7 +1629,7 @@ def fold_changes(result: Any, genes: list[str] | None = None, *, condition: str 
     A dot marks ``adj_p_value < alpha``; a blank cell, a gene not tested there
     (too little expression in that cell type).
     """
-    import matplotlib.pyplot as plt
+    plt = _plt()
     t = _THEME
     table = _result_table(result, key)
     gcol = table.columns[0]
@@ -1633,7 +1662,7 @@ def fold_changes(result: Any, genes: list[str] | None = None, *, condition: str 
     else:
         fig = ax.figure
     vmax = float(np.nanpercentile(np.abs(lfc), 98)) if np.isfinite(lfc).any() else 1.0
-    im = ax.imshow(np.ma.masked_invalid(lfc), cmap=kw.pop("cmap", DIV_CMAP), vmin=-vmax,
+    im = ax.imshow(np.ma.masked_invalid(lfc), cmap=kw.pop("cmap", _cmap("DIV_CMAP")), vmin=-vmax,
                    vmax=vmax, aspect="auto")
     yy, xx = np.nonzero(sig)
     ax.scatter(xx, yy, s=5, color=_c("text"), edgecolors="none")
@@ -1667,7 +1696,7 @@ def scrublet_score_distribution(adata: AnnData, *, log: bool = True, show: bool 
     ``ps.pp.scrublet(..., threshold=...)``. Cells are drawn on a log scale,
     where the few doublets would otherwise vanish beside the singlets.
     """
-    import matplotlib.pyplot as plt
+    plt = _plt()
     t = _THEME
     info = adata.uns.get("scrublet")
     if info is None:
@@ -1714,7 +1743,7 @@ def highly_variable_genes(adata: AnnData, ax: Any | None = None, show: bool = Tr
                           save: str | None = None, **kw) -> Any:
     """Mean–variance relation with HVGs softly highlighted."""
     import matplotlib.lines as mlines
-    import matplotlib.pyplot as plt
+    plt = _plt()
     t = _THEME
     var = adata.var
     if "means" not in var or "dispersions" not in var:
@@ -1769,7 +1798,7 @@ def dotplot(
     """
     markers = _resolve_markers(markers, kw, "dotplot")
     import matplotlib.cm as cm
-    import matplotlib.pyplot as plt
+    plt = _plt()
     from matplotlib.colors import Normalize
     t = _THEME
     split_by = kw.pop("split_by", None)
@@ -1806,7 +1835,7 @@ def dotplot(
         fig = ax.figure
     _apply_axes_style(ax, frame=False)
 
-    cmap = kw.pop("cmap", None) or DOT_CMAP
+    cmap = kw.pop("cmap", None) or _cmap("DOT_CMAP")
     norm = Normalize(vmin=0, vmax=max(mean_expr.max(), 1e-9))
     if split_by is None:
         xs, ys = np.meshgrid(range(len(groups)), range(len(valid_markers)))
@@ -1867,7 +1896,7 @@ def heatmap(
     `var_names=`.
     """
     markers = _resolve_markers(markers, kw, "heatmap")
-    import matplotlib.pyplot as plt
+    plt = _plt()
     t = _THEME
 
     groups = sorted(set(np.asarray(adata.obs[groupby]).tolist()),
@@ -1898,7 +1927,7 @@ def heatmap(
     else:
         fig = ax.figure
     _apply_axes_style(ax, frame=False)
-    im = ax.imshow(z, aspect="auto", cmap=cmap or DIV_CMAP, vmin=-2.5, vmax=2.5,
+    im = ax.imshow(z, aspect="auto", cmap=cmap or _cmap("DIV_CMAP"), vmin=-2.5, vmax=2.5,
                    interpolation="nearest")
     ax.set_xticks(range(len(groups)))
     ax.set_xticklabels([str(g) for g in groups], fontsize=t["tick"],
@@ -1943,7 +1972,7 @@ def rank_genes_groups(
         ps.tl.rank_genes_groups(adata, groupby="leiden")
         ps.pl.rank_genes_groups(adata, n_genes=8)
     """
-    import matplotlib.pyplot as plt
+    plt = _plt()
 
     if key not in adata.uns:
         raise KeyError(
@@ -2016,7 +2045,7 @@ def stacked_bar(
     **kw,
 ) -> Any:
     """Horizontal 100% composition bars with legend below."""
-    import matplotlib.pyplot as plt
+    plt = _plt()
     t = _THEME
 
     groups = sorted(set(np.asarray(adata.obs[groupby]).tolist()),
@@ -2071,7 +2100,7 @@ def stacked_bar(
 def scatter_qc(adata: AnnData, ax: Any | None = None, show: bool = True,
                save: str | None = None, **kw) -> Any:
     """QC scatter: genes vs counts with density rendering at scale."""
-    import matplotlib.pyplot as plt
+    plt = _plt()
     t = _THEME
 
     own = ax is None
@@ -2171,7 +2200,7 @@ def qc_distributions(adata: AnnData, keys: tuple | list = ("n_genes", "n_counts"
     kept cells, and the subtitle counts what was removed. Without it a
     threshold line sits at the edge of the data and cuts nothing.
     """
-    import matplotlib.pyplot as plt
+    plt = _plt()
     t = _THEME
     keys = [keys] if isinstance(keys, str) else list(keys)
     thresholds = thresholds or {}
@@ -2254,7 +2283,7 @@ def cluster_sizes(adata: AnnData, key: str = "leiden", *, log: bool | None = Non
     """Cells per cluster, largest first. The axis turns logarithmic when sizes
     span more than fifty-fold, and cluster names are written out only while
     they fit (at most 40); labels are plain numbers at every scale."""
-    import matplotlib.pyplot as plt
+    plt = _plt()
     from matplotlib.ticker import FuncFormatter
     t = _THEME
     sizes = pd.Series(np.asarray(adata.obs[key])).value_counts()
@@ -2343,7 +2372,7 @@ def overview(adata: AnnData, out: str, *, cluster_key: str = "leiden",
     be drawn."""
     import os
 
-    import matplotlib.pyplot as plt
+    plt = _plt()
     os.makedirs(out, exist_ok=True)
     path = lambda name: os.path.join(out, f"{prefix}{name}.png")  # noqa: E731
     files: dict[str, str] = {}

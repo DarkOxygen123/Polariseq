@@ -36,6 +36,7 @@ def test_in_memory_and_out_of_core_agree(proj) -> None:
 
 
 def test_renormalize_scales_each_cell_over_the_current_genes() -> None:
+    pytest.importorskip("scipy")
     if not FIXTURE.exists():
         pytest.skip("fixture not present")
     adata = ps.read_h5ad(FIXTURE, mode="memory")
@@ -53,6 +54,7 @@ def test_renormalize_scales_each_cell_over_the_current_genes() -> None:
 def test_in_memory_without_a_copy_equals_from_the_raw_counts() -> None:
     """normalize_total records each cell's total, so renormalize turns the values back into counts in
     place: the result equals renormalizing the raw counts, without holding a copy of them."""
+    pytest.importorskip("scipy")
     if not FIXTURE.exists():
         pytest.skip("fixture not present")
     results = []

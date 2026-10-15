@@ -258,7 +258,7 @@ class TestHarmony:
 def test_filter_cells_max_pct_mt() -> None:
     """The mitochondrial cutoff of the standard QC (e.g. scanpy's PBMC 3k
     tutorial keeps cells under 5 %) drops exactly the cells above it."""
-    import scipy.sparse as sp
+    sp = pytest.importorskip("scipy.sparse")
 
     x = np.array([
         [10, 0, 0],   # 0 % mitochondrial

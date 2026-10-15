@@ -1,0 +1,20 @@
+{
+  "min_genes": 200,
+  "min_cells": 3,
+  "target_sum": 10000,
+  "n_hvg": 2000,
+  "n_pcs": 50,
+  "neighbors": 15,
+  "resolution": 1.0,
+  "seed": 0,
+  "umap_epochs": 200,
+  "doublet": {
+    "expected_rate": 0.05,
+    "sim_ratio": 2.0,
+    "n_pcs": 30,
+    "min_counts": 3,
+    "min_cells": 3,
+    "variability_pctl": 85.0,
+    "min_group_cells": 200
+  }
+}

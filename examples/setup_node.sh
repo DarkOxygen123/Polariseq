@@ -42,7 +42,7 @@ sys.exit(0 if (3, 10) <= v <= (3, 14) else 1)
 EOF
 
 if [ -z "$WHEEL" ]; then
-  say "Rust and a C compiler"
+  say "Rust, a C compiler and CMake"
   export PATH="$HOME/.cargo/bin:$PATH"
   if ! command -v cargo >/dev/null; then
     if [ "$INSTALL_RUST" = 1 ]; then
@@ -54,6 +54,7 @@ if [ -z "$WHEEL" ]; then
   fi
   cargo --version
   command -v cc >/dev/null || command -v gcc >/dev/null || die "no C compiler. Load one (module load gcc) or install build-essential / Xcode command line tools."
+  command -v cmake >/dev/null || die "no CMake (3.16 or newer; it builds the bundled HDF5). Load one (module load cmake) or install it, for example with pip install cmake."
 fi
 
 say "Virtual environment in $(pwd)/.venv"

@@ -54,6 +54,9 @@ pub struct NndescentOptions {
     pub n_trees: usize,
     /// Leaf size of the trees (0 → `max(10, k)`).
     pub leaf_size: usize,
+    /// Largest subtree whose rows are copied together before it is split
+    /// further (0 → [`GATHER_MAX`]). Changes memory and speed, never the graph.
+    pub gather_max: usize,
     /// Random seed.
     pub seed: u64,
 }
@@ -67,6 +70,7 @@ impl Default for NndescentOptions {
             delta: 0.001,
             n_trees: 0,
             leaf_size: 0,
+            gather_max: 0,
             seed: 0,
         }
     }
@@ -454,6 +458,98 @@ fn rp_tree_leaves(
     rp_tree_leaves(data, d, right, base + split, leaf_size, rng, depth + 1, out);
 }
 
+/// Subtrees of at most this many points have their rows copied into one
+/// buffer before they are split further, so the levels below read memory in
+/// order. Larger ones are split in place on the input, as the copy would be
+/// as large as the subtree: random hyperplanes split unevenly, and on the
+/// 1.3M-cell brain atlas the subtrees reaching the sequential recursion held
+/// up to 49% of all cells (99th percentile 24%), so one copy per worker
+/// thread was the peak of the whole neighbours step (about 1 KB per cell at
+/// 16 threads). 2^20 points of 50 dimensions is 210 MB per thread.
+pub const GATHER_MAX: usize = 1 << 20;
+
+/// The sequential recursion of a subtree, on the input rows (`ids` index
+/// `data`) while the subtree is larger than `gather_max`, and on a gathered
+/// copy of its rows below that. Both follow `rp_tree_leaves` step for step,
+/// drawing from the same `rng` in the same order and comparing the same rows,
+/// so the tree does not depend on `gather_max`.
+fn rp_tree_sequential(
+    data: &[f32],
+    d: usize,
+    ids: &mut [u32],
+    base: usize,
+    leaf_size: usize,
+    rng: &mut Rng,
+    depth: usize,
+    gather_max: usize,
+    out: &mut Vec<(u32, u32)>,
+) {
+    let n = ids.len();
+    if n <= gather_max {
+        let mut local = Vec::with_capacity(n * d);
+        for &i in ids.iter() {
+            local.extend_from_slice(&data[i as usize * d..(i as usize + 1) * d]);
+        }
+        let mut local_ids: Vec<u32> = (0..n as u32).collect();
+        rp_tree_leaves(&local, d, &mut local_ids, base, leaf_size, rng, depth, out);
+        // `local_ids` is now the permutation; apply it to `ids`.
+        let snapshot: Vec<u32> = ids.to_vec();
+        for (slot, &li) in ids.iter_mut().zip(&local_ids) {
+            *slot = snapshot[li as usize];
+        }
+        return;
+    }
+    if n <= leaf_size || depth > 100 {
+        out.push((base as u32, (base + n) as u32));
+        return;
+    }
+    let (normal, offset) = random_hyperplane(data, d, ids, rng);
+    let sides: Vec<bool> = ids
+        .iter()
+        .map(|&i| {
+            let x = &data[i as usize * d..(i as usize + 1) * d];
+            let margin = simd::dot(&normal, x) + offset;
+            if margin.abs() < 1e-8 {
+                rng.next_u64() & 1 == 0
+            } else {
+                margin > 0.0
+            }
+        })
+        .collect();
+    let mut split = partition_in_place(ids, &sides);
+    drop(sides);
+    if split == 0 || split == n {
+        split = random_split(ids, rng);
+        if split == 0 || split == n {
+            out.push((base as u32, (base + n) as u32));
+            return;
+        }
+    }
+    let (left, right) = ids.split_at_mut(split);
+    rp_tree_sequential(
+        data,
+        d,
+        left,
+        base,
+        leaf_size,
+        rng,
+        depth + 1,
+        gather_max,
+        out,
+    );
+    rp_tree_sequential(
+        data,
+        d,
+        right,
+        base + split,
+        leaf_size,
+        rng,
+        depth + 1,
+        gather_max,
+        out,
+    );
+}
+
 /// Parallel recursion for the top levels (rayon `join`); below ~8k points
 /// the subtree's rows are gathered into a contiguous buffer (L2-resident)
 /// and finished sequentially — the levels below then read memory
@@ -466,30 +562,22 @@ fn rp_tree_parallel(
     leaf_size: usize,
     seed: u64,
     depth: usize,
+    gather_max: usize,
 ) -> Vec<(u32, u32)> {
     let n = ids.len();
     if n < 8192 || depth >= 6 {
-        let mut local = Vec::with_capacity(n * d);
-        for &i in ids.iter() {
-            local.extend_from_slice(&data[i as usize * d..(i as usize + 1) * d]);
-        }
-        let mut local_ids: Vec<u32> = (0..n as u32).collect();
         let mut out = Vec::new();
-        rp_tree_leaves(
-            &local,
+        rp_tree_sequential(
+            data,
             d,
-            &mut local_ids,
+            ids,
             base,
             leaf_size,
             &mut Rng(seed),
             depth,
+            gather_max,
             &mut out,
         );
-        // `local_ids` is now the permutation; apply it to `ids`.
-        let snapshot: Vec<u32> = ids.to_vec();
-        for (slot, &li) in ids.iter_mut().zip(&local_ids) {
-            *slot = snapshot[li as usize];
-        }
         return out;
     }
     let mut rng = Rng(seed);
@@ -521,6 +609,7 @@ fn rp_tree_parallel(
                 leaf_size,
                 splitmix(seed ^ 1),
                 depth + 1,
+                gather_max,
             )
         },
         || {
@@ -532,6 +621,7 @@ fn rp_tree_parallel(
                 leaf_size,
                 splitmix(seed ^ 2),
                 depth + 1,
+                gather_max,
             )
         },
     );
@@ -539,9 +629,16 @@ fn rp_tree_parallel(
     l
 }
 
-fn build_tree(data: &[f32], d: usize, n: usize, leaf_size: usize, seed: u64) -> Tree {
+fn build_tree(
+    data: &[f32],
+    d: usize,
+    n: usize,
+    leaf_size: usize,
+    seed: u64,
+    gather_max: usize,
+) -> Tree {
     let mut ids: Vec<u32> = (0..n as u32).collect();
-    let leaves = rp_tree_parallel(data, d, &mut ids, 0, leaf_size, seed, 0);
+    let leaves = rp_tree_parallel(data, d, &mut ids, 0, leaf_size, seed, 0, gather_max);
     Tree { ids, leaves }
 }
 
@@ -650,6 +747,11 @@ pub fn nndescent_into(
         k.max(10)
     };
     let seed = opts.seed;
+    let gather_max = if opts.gather_max > 0 {
+        opts.gather_max
+    } else {
+        GATHER_MAX
+    };
     let rpb = rows_per_bucket(n);
     let row = |i: usize| &data[i * d..(i + 1) * d];
 
@@ -667,7 +769,16 @@ pub fn nndescent_into(
     // ── 1. RP-tree forest initialisation ──────────────────────────────
     let forest: Vec<Tree> = (0..n_trees)
         .into_par_iter()
-        .map(|t| build_tree(data, d, n, leaf_size, splitmix(seed ^ (t as u64 + 1))))
+        .map(|t| {
+            build_tree(
+                data,
+                d,
+                n,
+                leaf_size,
+                splitmix(seed ^ (t as u64 + 1)),
+                gather_max,
+            )
+        })
         .collect();
     tick(
         &format!("rp-forest build ({n_trees} trees, leaf {leaf_size})"),
@@ -1024,6 +1135,39 @@ mod tests {
     }
 
     #[test]
+    fn the_gather_bound_does_not_change_the_graph() {
+        // Splitting large subtrees in place rather than on a copy of their
+        // rows is a memory choice: every bound gives the same graph.
+        let (n, d, k) = (20_000, 12, 10);
+        let data = make_clustered_data(n, d, 15, 11);
+        let graph = |gather_max: usize| {
+            nndescent(
+                &data,
+                n,
+                d,
+                &NndescentOptions {
+                    k,
+                    seed: 9,
+                    gather_max,
+                    ..Default::default()
+                },
+            )
+        };
+        let copied = graph(usize::MAX);
+        for gather_max in [1, 64, 1000] {
+            let g = graph(gather_max);
+            assert_eq!(g.indptr, copied.indptr, "gather_max {gather_max}");
+            assert_eq!(g.indices, copied.indices, "gather_max {gather_max}");
+            let same_bits = g
+                .data
+                .iter()
+                .zip(&copied.data)
+                .all(|(a, b)| a.to_bits() == b.to_bits());
+            assert!(same_bits, "gather_max {gather_max}: distances differ");
+        }
+    }
+
+    #[test]
     fn is_deterministic() {
         let (n, d, k) = (3000, 10, 12);
         let data = make_clustered_data(n, d, 7, 5);
@@ -1070,7 +1214,7 @@ mod forest_bench {
             .map(|i| (splitmix(i as u64) >> 40) as f32 / (1u64 << 24) as f32)
             .collect();
         let t = std::time::Instant::now();
-        let tree = build_tree(&data, d, n, 15, 1);
+        let tree = build_tree(&data, d, n, 15, 1, GATHER_MAX);
         println!(
             "one tree: {:.3}s, {} leaves",
             t.elapsed().as_secs_f64(),
@@ -1079,7 +1223,7 @@ mod forest_bench {
         let t = std::time::Instant::now();
         let forest: Vec<Tree> = (0..48)
             .into_par_iter()
-            .map(|tr| build_tree(&data, d, n, 15, tr as u64 + 1))
+            .map(|tr| build_tree(&data, d, n, 15, tr as u64 + 1, GATHER_MAX))
             .collect();
         println!("forest of 48: {:.3}s", t.elapsed().as_secs_f64());
         let _ = forest;

@@ -1086,12 +1086,13 @@ dependencies = [
 
 [[package]]
 name = "polariseq-core"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "crc32fast",
  "criterion",
  "faer",
  "flate2",
+ "libm",
  "memmap2",
  "rand 0.10.2",
  "rand_chacha 0.10.0",
@@ -1101,7 +1102,7 @@ dependencies = [
 
 [[package]]
 name = "polariseq-hdf5-raw"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "flate2",
  "hdf5-metno",
@@ -1110,7 +1111,7 @@ dependencies = [
 
 [[package]]
 name = "polariseq-io"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "faer",
  "flate2",
@@ -1125,7 +1126,7 @@ dependencies = [
 
 [[package]]
 name = "polariseq-python"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "hdf5-metno",
  "memmap2",

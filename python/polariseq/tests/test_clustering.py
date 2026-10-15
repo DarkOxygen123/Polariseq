@@ -1,6 +1,6 @@
 """Leiden clustering quality: recovery and igraph agreement.
 
-The handbook's acceptance: on a 20k Gaussian-mixture kNN graph the labels
+The acceptance test: on a 20k Gaussian-mixture kNN graph the labels
 are recovered (ARI ≥ 0.9), and against igraph's C Leiden on the SAME
 weighted (fuzzy connectivity) graph the modularity agrees within 0.5 % and
 ARI ≥ 0.9.
@@ -82,6 +82,7 @@ class TestLeiden:
         assert score >= 0.9, f"ARI vs mixture labels {score:.3f}"
 
     def test_connectivities_stored_by_neighbors(self, clustered) -> None:
+        pytest.importorskip("scipy")
         adata, _labels = clustered
         conn = adata.obsp["connectivities"]
         assert conn.shape == (adata.n_obs, adata.n_obs)
@@ -194,7 +195,7 @@ def test_default_leiden_clusters_the_connectivity_graph_as_given() -> None:
     overlapping groups, because well-separated ones come out perfect under
     either graph and test nothing."""
     pytest.importorskip("igraph")
-    from sklearn.metrics import adjusted_rand_score as ari
+    ari = pytest.importorskip("sklearn.metrics").adjusted_rand_score
 
     rng = np.random.default_rng(1)
     centers = rng.normal(size=(12, 20)) * 0.9

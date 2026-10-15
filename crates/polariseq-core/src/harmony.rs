@@ -10,13 +10,14 @@
     clippy::cast_sign_loss,
     clippy::float_cmp
 )]
-// Single letters follow the reference's notation (n cells, d dimensions, k
+// Single letters follow the paper's notation (n cells, d dimensions, k
 // clusters, b batches, r assignments, e expected and o observed tallies, y
-// centroids, w ridge coefficients); exact float comparisons (zero weights,
-// ties) are the reference's; project names appear in prose.
+// centroids, w ridge coefficients); exact float comparisons (zero weights)
+// are deliberate.
 
-//! Harmony batch correction (Korsunsky et al., Nature Methods 2019), computed
-//! as R harmony 2 and harmonypy 2 compute it.
+//! Harmony batch correction (Korsunsky et al., "Fast, sensitive and accurate
+//! integration of single-cell data with Harmony", Nature Methods 16, 1289,
+//! 2019).
 //!
 //! Cells are assigned softly to `K` clusters on the unit sphere. The
 //! assignment favours clusters that hold every batch in its overall
@@ -26,33 +27,27 @@
 //! weighted by its assignments. Clustering and correction alternate until the
 //! objective stops falling.
 //!
-//! The steps follow harmonypy 2.0.2's C++ backend (`src/harmony.cpp`), itself
-//! a step-by-step port of R harmony 2: the initial centroids, the assignment
-//! updates in shuffled blocks with the batch tallies frozen within a block,
-//! the assignments in log space, the objective and both convergence rules,
-//! the ridge with `lambda` estimated from the expected counts (`alpha`), and
-//! the ridge across several batch variables, which counts the cells their
-//! groups share. harmonypy is GPL-3.0-or-later, Copyright (C) 2018 Ilya
-//! Korsunsky, 2019 Kamil Slowikowski. Polariseq is therefore to be
-//! distributed under a licence compatible with the GPL, version 3 (see
-//! `THIRD_PARTY_NOTICES.md`).
+//! The algorithm follows the paper (Methods and Supplementary Note) and
+//! harmony-pytorch (https://github.com/lilab-bcb/harmony-pytorch, BSD-3-Clause,
+//! Copyright (c) 2019-2020 The Broad Institute, Inc. and The General Hospital
+//! Corporation; see `THIRD_PARTY_NOTICES.md`): k-means for the starting
+//! centroids, assignment rounds over shuffled blocks of cells with the
+//! tallies of the other cells fixed, the objective and its convergence
+//! windows, and the mixture-of-experts ridge correction. The options R
+//! harmony documents (`harmony_options`, `RunHarmony`) are supported as
+//! documented: a diversity penalty and a ridge penalty per batch variable,
+//! the ridge penalty estimated as `alpha` times a batch's expected number of
+//! cells in a cluster when none is given, and `batch_prop_cutoff`.
 //!
-//! What differs is how the work is laid out, not what is computed:
-//!
-//! - **Memory.** The embedding is read where it lies (often a memory-mapped
-//!   result file) and the corrected one is written into the caller's buffer.
-//!   The soft assignments (`n × K` `f32`) are the only working array the
-//!   size of the data: distances to the centroids are computed for a tile of
-//!   cells at a time instead of being kept for every cell, and the shuffled
-//!   order is an index list rather than shuffled copies of the matrices.
-//! - **Accuracy.** The tallies, the ridge systems and the objective are kept
-//!   in `f64`; the reference keeps them in `f32` and updates the tallies
-//!   incrementally.
-//! - **Determinism.** One `ChaCha8` stream draws the initial centroids and
-//!   the update orders, and sums over cells run in fixed chunks merged in
-//!   order, so the result does not depend on the number of threads. The
-//!   random numbers differ from the reference's `mt19937`, so the result
-//!   agrees with the reference as two of its own seeds agree with each other.
+//! The data layout is our own. The embedding is read where it lies (often a
+//! memory-mapped result file) and the corrected one is written into the
+//! caller's buffer; the soft assignments (`n × K` `f32`) are the only
+//! working array the size of the data, distances to the centroids are
+//! computed a tile of cells at a time, and the shuffled order is an index
+//! list. Tallies, ridge systems and the objective are kept in `f64`. One
+//! `ChaCha8` stream draws every random choice, and sums over cells run in
+//! fixed chunks merged in order, so the result does not depend on the number
+//! of threads.
 
 use faer::linalg::matmul::matmul;
 use faer::{Accum, Mat, MatMut, MatRef, Par};
@@ -70,8 +65,8 @@ const MAX_PARTS: usize = 64;
 const PIECE: usize = 4096;
 /// Width of the convergence window of the assignment rounds.
 const WINDOW: usize = 3;
-/// Lloyd iterations refining the initial centroids.
-const INIT_LLOYD: usize = 10;
+/// Most Lloyd iterations refining the starting centroids.
+const INIT_LLOYD: usize = 25;
 
 /// One batch variable: a level code per cell, each below `n_levels`.
 #[derive(Debug, Clone, Copy)]
@@ -364,8 +359,8 @@ struct Sums {
     z_all: Vec<f64>,
 }
 
-/// One cluster's ridge solution: its new centroid (before normalising) and
-/// the offset of each batch it corrects, in the order of its kept batches.
+/// The ridge solution of one cluster: its intercept and the offset of each
+/// batch it corrects, in the order of those batches.
 struct Ridge {
     intercept: Vec<f64>,
     offsets: Vec<f64>,
@@ -383,11 +378,9 @@ struct Harmony<'a> {
     ids: Vec<u32>,
     /// The variable each batch belongs to.
     cov_of: Vec<usize>,
-    /// Share of the cells in each batch.
+    /// Cells per batch, and their share of all cells.
+    count: Vec<f64>,
     pr: Vec<f64>,
-    /// The reference's batch sizes: cells per batch over the number of
-    /// variables.
-    sizes: Vec<f64>,
     theta: Vec<f64>,
     lambda: Option<Vec<f64>>,
     alpha: f64,
@@ -398,13 +391,13 @@ struct Harmony<'a> {
     max_iter_kmeans: usize,
     eps_cluster: f64,
     eps_rounds: f64,
-    /// Centroids, `K × d`.
+    /// Centroids on the unit sphere, `K × d`.
     y: Vec<f32>,
     /// Soft assignments, `n × K`.
     r: Vec<f32>,
-    /// `Σ_j R_jk`; the expected tallies are `E_kb = rsum_k · pr_b`.
+    /// `Σ_j R_jk`; the expected tallies are `E_bk = rsum_k · pr_b`.
     rsum: Vec<f64>,
-    /// Observed tallies, `B × K`.
+    /// Observed tallies `O_bk = Σ_{j ∈ b} R_jk`, `B × K`.
     o: Vec<f64>,
     combos: Combos,
     rng: ChaCha8Rng,
@@ -496,7 +489,7 @@ impl<'a> Harmony<'a> {
             return bad(format!("{k} clusters for {n} cells"));
         }
 
-        // Batches numbered across variables; their sizes and shares.
+        // Batches numbered across the variables.
         let mut offset = Vec::with_capacity(n_cov);
         let mut b = 0;
         let mut cov_of = Vec::new();
@@ -515,7 +508,7 @@ impl<'a> Harmony<'a> {
         for &x in &ids {
             count[x as usize] += 1.0;
         }
-        let present_twice = covariates.iter().enumerate().any(|(c, cov)| {
+        let two_levels = covariates.iter().enumerate().any(|(c, cov)| {
             let o = offset[c] as usize;
             count[o..o + cov.n_levels]
                 .iter()
@@ -523,11 +516,11 @@ impl<'a> Harmony<'a> {
                 .count()
                 >= 2
         });
-        if !present_twice {
+        if !two_levels {
             return Err(HarmonyError::SingleBatch);
         }
         let pr: Vec<f64> = count.iter().map(|&x| x / n as f64).collect();
-        let sizes: Vec<f64> = count.iter().map(|&x| x / n_cov as f64).collect();
+        // tau discounts the penalty of batches with few cells per cluster.
         let tau = f64::from(opts.tau);
         let theta: Vec<f64> = (0..b)
             .map(|bb| {
@@ -550,8 +543,8 @@ impl<'a> Harmony<'a> {
             n_cov,
             ids,
             cov_of,
+            count,
             pr,
-            sizes,
             theta,
             lambda,
             alpha: f64::from(opts.alpha),
@@ -582,27 +575,40 @@ impl<'a> Harmony<'a> {
         ))
     }
 
+    /// The algorithm of Korsunsky et al. (2019): cells on the unit sphere;
+    /// starting centroids by k-means; then rounds of clustering (soft
+    /// assignments with the diversity penalty) and correction (a ridge
+    /// regression per cluster), until the objective stops falling. After a
+    /// correction the centroids are the clusters' ridge intercepts, and each
+    /// round starts from assignments by distance alone; the current versions
+    /// of Harmony (R harmony 1.x, harmonypy 2) behave so, and with it the
+    /// corrections agree with harmonypy's as its own seeds agree
+    /// (`benchmarks/relicence/harmony_compare.py` on the reproduce branch).
     fn run(mut self, zc: &mut [f32]) -> Result<HarmonyReport, HarmonyError> {
         normalize_rows_into(self.z, zc, self.d);
-        self.y = kmeans_init(zc, self.n, self.d, self.k, &mut self.rng);
+        self.y = kmeans_pp(zc, self.n, self.d, self.k, &mut self.rng);
         normalize_rows(&mut self.y, self.d);
-        let (kerr, ent) = self.assign_plain(zc, "initialization")?;
+        let (kerr, ent) = self.assign_all(zc, false, "initialization")?;
         let obj = self.objective(kerr, ent, "initialization")?;
         self.obj_kmeans.push(obj);
         self.obj_rounds.push(obj);
         let mut converged = false;
         for it in 1..=self.max_rounds {
+            if it > 1 {
+                normalize_rows(zc, self.d);
+                self.assign_all(zc, false, "cluster initialization")?;
+            }
             self.cluster(zc)?;
             self.correct(zc)?;
             let h = &self.obj_rounds;
             if self.trace {
                 eprintln!(
-                    "[harmony] iteration {it}: objective {:.4} after {} rounds",
+                    "[harmony] round {it}: objective {:.6e} after {} assignment rounds",
                     h[h.len() - 1],
                     self.rounds[self.rounds.len() - 1]
                 );
             }
-            if objective_converged(h[h.len() - 2], h[h.len() - 1], self.eps_rounds) {
+            if relative_drop(h[h.len() - 2], h[h.len() - 1]) < self.eps_rounds {
                 converged = true;
                 break;
             }
@@ -615,8 +621,9 @@ impl<'a> Harmony<'a> {
         })
     }
 
-    /// The objective: distances, entropy and the diversity cross-entropy,
-    /// scaled by `2000 / n` as the reference does.
+    /// The objective (the paper's eq. 1, cosine distances): `Σ R_jk ‖z_j − y_k‖²
+    /// + σ Σ R_jk ln R_jk + σ Σ θ_b O_bk ln((O + E + 1)/(2E + 1))`, the last
+    /// the diversity term of the weight in [`Self::penalty`].
     fn objective(&self, kerr: f64, ent: f64, stage: &str) -> Result<f64, HarmonyError> {
         let mut cross = 0.0;
         for bb in 0..self.b {
@@ -626,7 +633,7 @@ impl<'a> Harmony<'a> {
                 cross += self.theta[bb] * o * ((o + e + 1.0) / (2.0 * e + 1.0)).ln();
             }
         }
-        let obj = (kerr + self.sigma * ent + self.sigma * cross) * 2000.0 / self.n as f64;
+        let obj = kerr + self.sigma * ent + self.sigma * cross;
         if obj.is_finite() {
             Ok(obj)
         } else {
@@ -634,12 +641,37 @@ impl<'a> Harmony<'a> {
         }
     }
 
-    /// Assignments from the distances alone (no diversity penalty) for every
-    /// cell, with the tallies; returns the objective's distance and entropy
-    /// terms.
-    fn assign_plain(&mut self, zc: &[f32], stage: &str) -> Result<(f64, f64), HarmonyError> {
+    /// `ln` of each batch's diversity weight in each cluster, `B × K`, from
+    /// the current tallies: `θ_b ln((2E + 1)/(O + E + 1))`. The paper's
+    /// `((E + 1)/(O + 1))^θ` gives corrections further from those of the
+    /// current versions of Harmony than their own seed-to-seed spread (fetal
+    /// atlas, 28 donors: 0.45 against 0.31), this form within it (0.28).
+    fn penalty(&self) -> Vec<f32> {
+        let k = self.k;
+        let mut p = vec![0.0_f32; self.b * k];
+        for bb in 0..self.b {
+            for kk in 0..k {
+                let e = self.rsum[kk] * self.pr[bb];
+                let o = self.o[bb * k + kk];
+                p[bb * k + kk] =
+                    (self.theta[bb] * ((2.0 * e + 1.0).ln() - (o + e + 1.0).ln())) as f32;
+            }
+        }
+        p
+    }
+
+    /// Every cell's assignments, with (`penalized`) or without the diversity
+    /// penalty of the current tallies, and the tallies recomputed; returns the
+    /// objective's distance and entropy terms.
+    fn assign_all(
+        &mut self,
+        zc: &[f32],
+        penalized: bool,
+        stage: &str,
+    ) -> Result<(f64, f64), HarmonyError> {
         let (k, d, b, nc) = (self.k, self.d, self.b, self.n_cov);
         let chunk = chunk_len(self.n);
+        let pen = penalized.then(|| self.penalty());
         let y = MatRef::from_row_major_slice(&self.y, k, d);
         let sigma = self.sigma as f32;
         let ids = &self.ids;
@@ -651,16 +683,21 @@ impl<'a> Harmony<'a> {
             .map(|(ci, (rc, xc))| {
                 let m = rc.len() / k;
                 let mut t = Tally::new(k, b);
+                let mut pj = vec![0.0_f32; k];
                 for t0 in (0..m).step_by(TILE) {
                     let mt = TILE.min(m - t0);
                     let dots = centroid_dots(y, &xc[t0 * d..(t0 + mt) * d], mt, d);
                     for tt in 0..mt {
                         let j = ci * chunk + t0 + tt;
+                        let batches = &ids[j * nc..(j + 1) * nc];
+                        let p = pen
+                            .as_ref()
+                            .map(|pen| cell_penalty(pen, batches, k, &mut pj));
                         let row = &mut rc[(t0 + tt) * k..(t0 + tt + 1) * k];
-                        let (ke, en) = assign_cell(dots.col_as_slice(tt), None, sigma, row)?;
+                        let (ke, en) = assign_cell(dots.col_as_slice(tt), p, sigma, row)?;
                         t.kerr += ke;
                         t.ent += en;
-                        t.add(row, &ids[j * nc..(j + 1) * nc]);
+                        t.add(row, batches);
                     }
                 }
                 Some(t)
@@ -682,93 +719,55 @@ impl<'a> Harmony<'a> {
         Ok((total.kerr, total.ent))
     }
 
-    /// One clustering: from the second iteration on, the corrected cells are
-    /// normalised and assigned afresh from the distances; then the
-    /// assignment rounds.
-    fn cluster(&mut self, zc: &mut [f32]) -> Result<(), HarmonyError> {
-        if self.obj_rounds.len() > 1 {
-            normalize_rows(zc, self.d);
-            self.assign_plain(zc, "cluster initialization")?;
-        }
+    /// The clustering of one round: assignment rounds, each over the cells in
+    /// a fresh random order a block at a time, until the objective, summed
+    /// over a window of three rounds, falls by less than `epsilon_cluster`.
+    fn cluster(&mut self, zc: &[f32]) -> Result<(), HarmonyError> {
         let mut rounds = 0;
+        let mut here: Vec<f64> = Vec::new();
         for i in 0..self.max_iter_kmeans {
-            let (kerr, ent) = self.update_assignments(zc)?;
+            let (kerr, ent) = self.update_blocks(zc)?;
             let obj = self.objective(kerr, ent, "assignment update")?;
             self.obj_kmeans.push(obj);
+            here.push(obj);
             rounds = i + 1;
-            if i > WINDOW && self.kmeans_converged() {
-                break;
+            let o = &here;
+            if o.len() > WINDOW {
+                let old: f64 = o[o.len() - 1 - WINDOW..o.len() - 1].iter().sum();
+                let new: f64 = o[o.len() - WINDOW..].iter().sum();
+                if relative_drop(old, new) < self.eps_cluster {
+                    break;
+                }
             }
         }
         self.rounds.push(rounds);
-        let last = self.obj_kmeans[self.obj_kmeans.len() - 1];
-        self.obj_rounds.push(last);
+        self.obj_rounds
+            .push(self.obj_kmeans[self.obj_kmeans.len() - 1]);
         Ok(())
     }
 
-    fn kmeans_converged(&self) -> bool {
-        let o = &self.obj_kmeans;
-        let n = o.len();
-        if n <= WINDOW + 1 {
-            return false;
-        }
-        let old: f64 = (0..WINDOW).map(|i| o[n - 2 - i]).sum();
-        let new: f64 = (0..WINDOW).map(|i| o[n - 1 - i]).sum();
-        (old - new).abs() / old.abs() < self.eps_cluster
-    }
-
-    /// `θ_b (ln(2E_kb + 1) − ln(O_kb + E_kb + 1))`, the log of each batch's
-    /// diversity weight in each cluster, `B × K`.
-    fn penalty(&self) -> Vec<f32> {
-        let k = self.k;
-        let mut p = vec![0.0_f32; self.b * k];
-        for bb in 0..self.b {
-            for kk in 0..k {
-                let e = self.rsum[kk] * self.pr[bb];
-                let o = self.o[bb * k + kk];
-                p[bb * k + kk] =
-                    (self.theta[bb] * ((2.0 * e + 1.0).ln() - (o + e + 1.0).ln())) as f32;
-            }
-        }
-        p
-    }
-
-    /// One assignment round: the cells in a shuffled order, a block at a
-    /// time; each block's tallies are taken out, its cells reassigned with
-    /// the rest frozen, and put back. Returns the objective's distance and
+    /// One assignment round. The cells go in a random order, a block of
+    /// `block_size · n` at a time; a block's own assignments are taken out of
+    /// the tallies, its cells reassigned against the tallies of all the other
+    /// cells, and the new assignments put back. Returns the distance and
     /// entropy terms over all cells.
-    fn update_assignments(&mut self, zc: &[f32]) -> Result<(f64, f64), HarmonyError> {
+    fn update_blocks(&mut self, zc: &[f32]) -> Result<(f64, f64), HarmonyError> {
         let (n, k, d, b, nc) = (self.n, self.k, self.d, self.b, self.n_cov);
         let mut order: Vec<u32> = (0..n as u32).collect();
         order.shuffle(&mut self.rng);
-        // The reference's block layout, in its arithmetic.
-        let n_blocks = (1.0 / f64::from(self.block_size)).ceil() as usize;
-        let per_block = ((n as f32 * self.block_size) as usize).max(1);
+        let per_block = ((n as f64 * f64::from(self.block_size)) as usize).max(1);
         let sigma = self.sigma as f32;
-
         let mut r = std::mem::take(&mut self.r);
         let mut rows: Vec<&mut [f32]> = r.chunks_mut(k).collect();
         let (mut kerr, mut ent) = (0.0, 0.0);
         let mut failed = false;
-        for i in 0..n_blocks {
-            let lo = i * per_block;
-            if lo >= n {
-                break;
-            }
-            let hi = if i + 1 == n_blocks {
-                n
-            } else {
-                (lo + per_block).min(n)
-            };
-            let cells = &order[lo..hi];
+        for cells in order.chunks(per_block) {
             let mut taken: Vec<&mut [f32]> = cells
                 .iter()
                 .map(|&j| std::mem::take(&mut rows[j as usize]))
                 .collect();
             let sub = chunk_len(cells.len());
             let ids = &self.ids;
-
-            // 1. Take the block's assignments out of the tallies.
             let old: Vec<Tally> = taken
                 .par_chunks(sub)
                 .zip(cells.par_chunks(sub))
@@ -788,8 +787,6 @@ impl<'a> Harmony<'a> {
                     *s -= x;
                 }
             }
-
-            // 2. Reassign them against the frozen tallies.
             let pen = self.penalty();
             let y = MatRef::from_row_major_slice(&self.y, k, d);
             let new: Vec<Option<Tally>> = taken
@@ -810,19 +807,7 @@ impl<'a> Harmony<'a> {
                         for tt in 0..mt {
                             let j = cc[t0 + tt] as usize;
                             let batches = &ids[j * nc..(j + 1) * nc];
-                            let p: &[f32] = if nc == 1 {
-                                let bb = batches[0] as usize;
-                                &pen[bb * k..(bb + 1) * k]
-                            } else {
-                                pj.fill(0.0);
-                                for &bb in batches {
-                                    let bb = bb as usize;
-                                    for (s, &v) in pj.iter_mut().zip(&pen[bb * k..(bb + 1) * k]) {
-                                        *s += v;
-                                    }
-                                }
-                                &pj
-                            };
+                            let p = cell_penalty(&pen, batches, k, &mut pj);
                             let row = &mut *rc[t0 + tt];
                             let (ke, en) = assign_cell(dots.col_as_slice(tt), Some(p), sigma, row)?;
                             t.kerr += ke;
@@ -833,8 +818,6 @@ impl<'a> Harmony<'a> {
                     Some(t)
                 })
                 .collect();
-
-            // 3. Put the block back.
             for t in &new {
                 match t {
                     Some(t) => {
@@ -868,38 +851,39 @@ impl<'a> Harmony<'a> {
         Ok((kerr, ent))
     }
 
-    /// The batches cluster `kk` corrects (the reference's `keep`): those
-    /// holding more than `cutoff` of their cells there, in variables with at
-    /// least two such batches. Empty when no variable qualifies.
-    fn kept_batches(&self, kk: usize) -> Vec<usize> {
-        let share = |bb: usize| self.o[bb * self.k + kk] / self.sizes[bb];
-        let mut levels = vec![0_usize; self.n_cov];
+    /// The batches cluster `kk` corrects: those with more than
+    /// `batch_prop_cutoff` of their cells in it (R harmony's documented
+    /// `batch.prop.cutoff`), within variables keeping at least two batches
+    /// (a variable left with one has no difference to remove). Empty when
+    /// no variable qualifies.
+    fn corrected_batches(&self, kk: usize) -> Vec<usize> {
+        let present: Vec<bool> = (0..self.b)
+            .map(|bb| {
+                self.count[bb] > 0.0 && self.o[bb * self.k + kk] / self.count[bb] > self.cutoff
+            })
+            .collect();
+        let mut per_cov = vec![0_usize; self.n_cov];
         for bb in 0..self.b {
-            if share(bb) > self.cutoff {
-                levels[self.cov_of[bb]] += 1;
-            }
-        }
-        if levels.iter().all(|&l| l <= 1) {
-            return Vec::new();
+            per_cov[self.cov_of[bb]] += usize::from(present[bb]);
         }
         (0..self.b)
-            .filter(|&bb| share(bb) > self.cutoff && levels[self.cov_of[bb]] > 1)
+            .filter(|&bb| present[bb] && per_cov[self.cov_of[bb]] >= 2)
             .collect()
     }
 
-    /// The correction: per cluster, a ridge regression of the original
-    /// embedding on the batch indicators, weighted by the assignments; each
-    /// cell then moves by its clusters' batch offsets, weighted the same way.
+    /// The correction (the paper's mixture of experts): per cluster, a
+    /// ridge regression of the original embedding on an intercept and the
+    /// indicators of the batches it corrects, each cell weighted by its
+    /// assignment; every cell then moves back by its batches' coefficients,
+    /// weighted by its assignments.
     fn correct(&mut self, zc: &mut [f32]) -> Result<(), HarmonyError> {
         let (k, d, b) = (self.k, self.d, self.b);
-        let keep: Vec<Vec<usize>> = (0..k).map(|kk| self.kept_batches(kk)).collect();
+        let keep: Vec<Vec<usize>> = (0..k).map(|kk| self.corrected_batches(kk)).collect();
         let sums = self.cell_sums(&keep);
         let solved: Vec<Option<Ridge>> = (0..k)
             .into_par_iter()
-            .map(|kk| self.solve(kk, &keep[kk], &sums))
+            .map(|kk| self.ridge(kk, &keep[kk], &sums))
             .collect();
-        // Batch offsets per cluster, `B × K × d`, zero where a cluster leaves
-        // the batch alone.
         let mut w = vec![0.0_f32; b * k * d];
         let mut corrects = vec![false; b * k];
         for (kk, ridge) in solved.into_iter().enumerate() {
@@ -922,6 +906,102 @@ impl<'a> Harmony<'a> {
         self.apply(&w, &corrects, zc)?;
         normalize_rows(&mut self.y, d);
         Ok(())
+    }
+
+    /// Cluster `kk`'s ridge regression. With `X` the design (an intercept
+    /// and one indicator per corrected batch, over the cells holding at least
+    /// one of those batches) and `R` the cluster's assignments, the
+    /// coefficients solve `(Xᵀ R X + Λ) W = Xᵀ R Z`, `Λ` diagonal with no
+    /// penalty on the intercept and `λ_b` on each batch: the option's value,
+    /// or `alpha` times the batch's expected count in the cluster (R
+    /// harmony's documented estimate). `Xᵀ R X` has the assignment sums of
+    /// the cells in the intercept corner, `O_bk` on the diagonal and its
+    /// first row and column, and between batches of two variables the
+    /// assignment sum of the cells in both. One variable gives an arrow
+    /// matrix, solved through its Schur complement; several, a dense solve.
+    fn ridge(&self, kk: usize, keep: &[usize], sums: &Sums) -> Option<Ridge> {
+        if keep.is_empty() {
+            return None;
+        }
+        let (k, d, b) = (self.k, self.d, self.b);
+        let sz = keep.len() + 1;
+        let pen = |bb: usize| match &self.lambda {
+            None => self.alpha * self.rsum[kk] * self.pr[bb],
+            Some(l) => l[bb],
+        };
+        let mut rhs = vec![0.0_f64; sz * d];
+        for (i, &bb) in keep.iter().enumerate() {
+            rhs[(i + 1) * d..(i + 2) * d]
+                .copy_from_slice(&sums.s[(bb * k + kk) * d..(bb * k + kk + 1) * d]);
+        }
+        let w = if self.n_cov == 1 {
+            // Arrow matrix [[a, oᵀ], [o, D]]: W_0 = (r_0 − Σ o_b r_b / D_b) / s
+            // with s = a − Σ o_b² / D_b, then W_b = (r_b − o_b W_0) / D_b.
+            let o: Vec<f64> = keep.iter().map(|&bb| self.o[bb * k + kk]).collect();
+            let dg: Vec<f64> = keep.iter().zip(&o).map(|(&bb, &ob)| ob + pen(bb)).collect();
+            let a: f64 = o.iter().sum();
+            for i in 1..sz {
+                for t in 0..d {
+                    rhs[t] += rhs[i * d + t];
+                }
+            }
+            let s = a - o.iter().zip(&dg).map(|(ob, db)| ob * ob / db).sum::<f64>();
+            let mut w = vec![0.0_f64; sz * d];
+            for t in 0..d {
+                let mut num = rhs[t];
+                for i in 0..sz - 1 {
+                    num -= o[i] / dg[i] * rhs[(i + 1) * d + t];
+                }
+                w[t] = num / s;
+            }
+            for i in 0..sz - 1 {
+                for t in 0..d {
+                    w[(i + 1) * d + t] = (rhs[(i + 1) * d + t] - o[i] * w[t]) / dg[i];
+                }
+            }
+            w
+        } else {
+            let mut row_of = vec![0_usize; b];
+            for (i, &bb) in keep.iter().enumerate() {
+                row_of[bb] = i + 1;
+            }
+            let mut g = vec![0.0_f64; sz * sz];
+            for m in 0..self.combos.len() {
+                let wsum = sums.f[m * k + kk];
+                let rows: Vec<usize> = self
+                    .combos
+                    .levels(m)
+                    .iter()
+                    .map(|&bb| row_of[bb as usize])
+                    .filter(|&r| r != 0)
+                    .collect();
+                if rows.is_empty() {
+                    continue;
+                }
+                g[0] += wsum;
+                for &r1 in &rows {
+                    g[r1] += wsum;
+                    g[r1 * sz] += wsum;
+                    for &r2 in &rows {
+                        g[r1 * sz + r2] += wsum;
+                    }
+                }
+            }
+            for (i, &bb) in keep.iter().enumerate() {
+                g[(i + 1) * sz + i + 1] += pen(bb);
+            }
+            rhs[..d].copy_from_slice(&sums.z_all[kk * d..(kk + 1) * d]);
+            solve_dense(&g, sz, &rhs, d)?
+        };
+        if !w.iter().all(|v| v.is_finite()) {
+            return None;
+        }
+        let mut w = w;
+        let offsets = w.split_off(d);
+        Some(Ridge {
+            intercept: w,
+            offsets,
+        })
     }
 
     /// `Σ_{j ∈ b} R_jk z_j` for every batch and cluster, from tasks over the
@@ -1004,95 +1084,6 @@ impl<'a> Harmony<'a> {
         Sums { s, f: f_all, z_all }
     }
 
-    /// Cluster `kk`'s ridge regression on the indicators of the batches it
-    /// corrects (`keep`, not empty): the intercept is the cluster's centre in
-    /// the original embedding, the other coefficients each batch's offset
-    /// from it. `None` if the system is singular.
-    fn solve(&self, kk: usize, keep: &[usize], sums: &Sums) -> Option<Ridge> {
-        if keep.is_empty() {
-            return None;
-        }
-        let (k, d, b, nc) = (self.k, self.d, self.b, self.n_cov);
-        let sz = keep.len() + 1;
-        let mut cov = vec![0.0_f64; sz * sz];
-        let mut rhs = vec![0.0_f64; sz * d];
-        for (i, &bb) in keep.iter().enumerate() {
-            let o = self.o[bb * k + kk];
-            cov[0] += o;
-            cov[i + 1] = o;
-            cov[(i + 1) * sz] = o;
-            cov[(i + 1) * sz + i + 1] = o;
-            rhs[(i + 1) * d..(i + 2) * d]
-                .copy_from_slice(&sums.s[(bb * k + kk) * d..(bb * k + kk + 1) * d]);
-        }
-        if nc > 1 {
-            // Cells belong to a batch of every variable: count each once in
-            // the intercept, and the overlap of two batches between them.
-            let mut row_of = vec![0_usize; b];
-            for (i, &bb) in keep.iter().enumerate() {
-                row_of[bb] = i + 1;
-            }
-            cov[0] = 0.0;
-            for m in 0..self.combos.len() {
-                let w = sums.f[m * k + kk];
-                let lv = self.combos.levels(m);
-                let mut selected = false;
-                for (c, &b1) in lv.iter().enumerate() {
-                    let r1 = row_of[b1 as usize];
-                    if r1 == 0 {
-                        continue;
-                    }
-                    selected = true;
-                    for &b2 in &lv[c + 1..] {
-                        let r2 = row_of[b2 as usize];
-                        if r2 != 0 {
-                            cov[r1 * sz + r2] += w;
-                            cov[r2 * sz + r1] += w;
-                        }
-                    }
-                }
-                if selected {
-                    cov[0] += w;
-                }
-            }
-            rhs[..d].copy_from_slice(&sums.z_all[kk * d..(kk + 1) * d]);
-        } else {
-            for i in 1..sz {
-                for t in 0..d {
-                    rhs[t] += rhs[i * d + t];
-                }
-            }
-        }
-        for (i, &bb) in keep.iter().enumerate() {
-            cov[(i + 1) * sz + i + 1] += match &self.lambda {
-                None => self.alpha * self.rsum[kk] * self.pr[bb],
-                Some(l) => l[bb],
-            };
-        }
-        let inv = if nc > 1 {
-            invert(&cov, sz)?
-        } else {
-            arrow_inverse(&cov, sz)
-        };
-        let mut w = vec![0.0_f64; sz * d];
-        for r in 0..sz {
-            for c in 0..sz {
-                let a = inv[r * sz + c];
-                for t in 0..d {
-                    w[r * d + t] += a * rhs[c * d + t];
-                }
-            }
-        }
-        if !w.iter().all(|v| v.is_finite()) {
-            return None;
-        }
-        let offsets = w.split_off(d);
-        Some(Ridge {
-            intercept: w,
-            offsets,
-        })
-    }
-
     /// `zc_j = z_j − Σ_variables Σ_k R_jk W_{b(j), k}`.
     fn apply(&self, w: &[f32], corrects: &[bool], zc: &mut [f32]) -> Result<(), HarmonyError> {
         let (k, d, nc) = (self.k, self.d, self.n_cov);
@@ -1132,19 +1123,6 @@ impl<'a> Harmony<'a> {
             Err(self.numerical("correction", "corrected coordinates must be finite"))
         }
     }
-}
-
-/// Converged when the objective fell, by less than `epsilon` of its size.
-/// An increase never counts (harmonypy 2.0.2, R harmony PR 293).
-fn objective_converged(old: f64, new: f64, epsilon: f64) -> bool {
-    if !(old.is_finite() && new.is_finite() && epsilon.is_finite()) {
-        return false;
-    }
-    if old == 0.0 {
-        return new == 0.0;
-    }
-    let delta = (old - new) / old.abs();
-    (0.0..epsilon).contains(&delta)
 }
 
 /// Cells per parallel chunk of a pass over `n` cells.
@@ -1247,98 +1225,101 @@ fn normalize_rows(x: &mut [f32], d: usize) {
     });
 }
 
-/// SplitMix64 of two words: independent seeds for parallel streams.
-fn mix(a: u64, b: u64) -> u64 {
-    let mut z = a ^ b.wrapping_mul(0x9E37_79B9_7F4A_7C15);
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^ (z >> 31)
+/// `(old − new) / |old|`: how much the objective fell, relative to its size
+/// (negative when it rose, which counts as converged, as in the paper's
+/// procedure and harmony-pytorch).
+fn relative_drop(old: f64, new: f64) -> f64 {
+    if old == 0.0 {
+        return if new == 0.0 { 0.0 } else { f64::INFINITY };
+    }
+    (old - new) / old.abs()
 }
 
-/// The reference's initial centroids. `K` cells drawn at random; then, for
-/// each, a cell drawn with probability proportional to its distance from it
-/// (the smallest `−ln(u) / dist`, an exponential race), never one already
-/// taken; then ten Lloyd iterations. `x` holds unit-length rows.
-fn kmeans_init(x: &[f32], n: usize, d: usize, k: usize, rng: &mut ChaCha8Rng) -> Vec<f32> {
-    let mut y = vec![0.0_f32; k * d];
-    for c in 0..k {
-        let j = ((rng.random::<f32>() * n as f32).round() as usize).min(n - 1);
-        y[c * d..(c + 1) * d].copy_from_slice(&x[j * d..(j + 1) * d]);
+/// A cell's log diversity weights: the sum, over its batch variables, of its
+/// batches' rows of `pen` (`B × K`).
+#[inline]
+fn cell_penalty<'p>(pen: &'p [f32], batches: &[u32], k: usize, buf: &'p mut [f32]) -> &'p [f32] {
+    if let [bb] = batches {
+        let bb = *bb as usize;
+        return &pen[bb * k..(bb + 1) * k];
     }
-    let stream = rng.random::<u64>();
-    let chunk = chunk_len(n);
-    // Each race keeps its `K` fastest cells, enough to pass over the at most
-    // `K − 1` cells earlier races took. Keys are the race time's bits (times
-    // are non-negative) above the cell index, so ties go to the lower index.
-    let parts: Vec<Vec<std::collections::BinaryHeap<u64>>> = {
-        let start = MatRef::from_row_major_slice(&y, k, d);
-        x.par_chunks(chunk * d)
-            .enumerate()
-            .map(|(ci, xc)| {
-                let m = xc.len() / d;
-                let mut crng = ChaCha8Rng::seed_from_u64(mix(stream, ci as u64));
-                let mut best = vec![std::collections::BinaryHeap::with_capacity(k + 1); k];
-                for t0 in (0..m).step_by(TILE) {
-                    let mt = TILE.min(m - t0);
-                    let dots = centroid_dots(start, &xc[t0 * d..(t0 + mt) * d], mt, d);
-                    for tt in 0..mt {
-                        let j = (ci * chunk + t0 + tt) as u64;
-                        for (c, &dot) in dots.col_as_slice(tt).iter().enumerate() {
-                            let u = crng.random::<f32>();
-                            let dist = (2.0 * (1.0 - dot)).abs();
-                            let race = -u.ln() / (dist + 1e-10);
-                            push_fastest(&mut best[c], (u64::from(race.to_bits()) << 32) | j, k);
-                        }
-                    }
-                }
-                best
-            })
-            .collect()
-    };
-    let mut best = vec![std::collections::BinaryHeap::with_capacity(k + 1); k];
-    for part in parts {
-        for (c, heap) in part.into_iter().enumerate() {
-            for key in heap {
-                push_fastest(&mut best[c], key, k);
-            }
+    buf.fill(0.0);
+    for &bb in batches {
+        let bb = bb as usize;
+        for (s, &v) in buf.iter_mut().zip(&pen[bb * k..(bb + 1) * k]) {
+            *s += v;
         }
     }
-    let mut taken: Vec<usize> = Vec::with_capacity(k);
-    for (c, heap) in best.into_iter().enumerate() {
-        let order = heap.into_sorted_vec();
-        let j = order
-            .iter()
-            .map(|&key| (key & 0xFFFF_FFFF) as usize)
-            .find(|j| !taken.contains(j))
-            .expect("k <= n leaves a cell for every centroid");
-        taken.push(j);
+    buf
+}
+
+/// Starting centroids: k-means++ seeding (Arthur & Vassilvitskii 2007) on the
+/// normalized cells, then Lloyd iterations until no cell changes cluster or
+/// [`INIT_LLOYD`] passes. Seeding draws each next centre with probability
+/// proportional to the squared distance to the nearest centre so far; the
+/// draw walks chunk sums in a fixed order, so the result does not depend on
+/// the number of threads.
+fn kmeans_pp(x: &[f32], n: usize, d: usize, k: usize, rng: &mut ChaCha8Rng) -> Vec<f32> {
+    let mut y = vec![0.0_f32; k * d];
+    let first = rng.random_range(0..n);
+    y[..d].copy_from_slice(&x[first * d..(first + 1) * d]);
+    let chunk = chunk_len(n);
+    let mut nearest = vec![f32::INFINITY; n];
+    for c in 1..k {
+        let prev = &y[(c - 1) * d..c * d];
+        let sums: Vec<f64> = nearest
+            .par_chunks_mut(chunk)
+            .zip(x.par_chunks(chunk * d))
+            .map(|(nc, xc)| {
+                let mut s = 0.0_f64;
+                for (best, row) in nc.iter_mut().zip(xc.chunks(d)) {
+                    let dist: f32 = row.iter().zip(prev).map(|(a, b)| (a - b) * (a - b)).sum();
+                    if dist < *best {
+                        *best = dist;
+                    }
+                    s += f64::from(*best);
+                }
+                s
+            })
+            .collect();
+        let total: f64 = sums.iter().sum();
+        let mut pick = rng.random::<f64>() * total;
+        let mut j = n - 1;
+        'walk: for (ci, &s) in sums.iter().enumerate() {
+            if pick < s {
+                for (t, &v) in nearest[ci * chunk..(ci * chunk + chunk).min(n)]
+                    .iter()
+                    .enumerate()
+                {
+                    pick -= f64::from(v);
+                    if pick < 0.0 {
+                        j = ci * chunk + t;
+                        break 'walk;
+                    }
+                }
+            } else {
+                pick -= s;
+            }
+        }
         y[c * d..(c + 1) * d].copy_from_slice(&x[j * d..(j + 1) * d]);
     }
     for _ in 0..INIT_LLOYD {
-        lloyd_step(x, n, d, k, &mut y, rng);
+        if !lloyd_step(x, n, d, k, &mut y) {
+            break;
+        }
     }
     y
 }
 
-/// Keep the `cap` smallest keys in a max-heap.
-fn push_fastest(heap: &mut std::collections::BinaryHeap<u64>, key: u64, cap: usize) {
-    if heap.len() < cap {
-        heap.push(key);
-    } else if heap.peek().is_some_and(|&top| key < top) {
-        heap.pop();
-        heap.push(key);
-    }
-}
-
-/// One Lloyd iteration (Armadillo's `kmeans` with `keep_existing` and one
-/// iteration, as the reference calls it): each cell to its nearest centroid,
-/// each centroid to its cells' mean. An empty cluster takes the last cell of
-/// a cluster holding two or more, those in descending order, and a random
-/// cell once they run out.
-fn lloyd_step(x: &[f32], n: usize, d: usize, k: usize, y: &mut [f32], rng: &mut ChaCha8Rng) {
+/// One Lloyd iteration: each cell to its nearest centroid, each centroid to
+/// the mean of its cells; an empty cluster is moved to the cell farthest from
+/// its centroid. Returns whether any cell changed cluster since the centroids
+/// were last computed (always true the first time).
+fn lloyd_step(x: &[f32], n: usize, d: usize, k: usize, y: &mut [f32]) -> bool {
+    type Part = (Vec<f64>, Vec<u64>, (f32, usize));
     let norms: Vec<f32> = y.chunks(d).map(|c| c.iter().map(|v| v * v).sum()).collect();
     let chunk = chunk_len(n);
-    let parts: Vec<(Vec<f64>, Vec<u64>, Vec<u32>)> = {
+    let parts: Vec<Part> = {
         let yr = MatRef::from_row_major_slice(y, k, d);
         x.par_chunks(chunk * d)
             .enumerate()
@@ -1346,7 +1327,7 @@ fn lloyd_step(x: &[f32], n: usize, d: usize, k: usize, y: &mut [f32], rng: &mut 
                 let m = xc.len() / d;
                 let mut sums = vec![0.0_f64; k * d];
                 let mut counts = vec![0_u64; k];
-                let mut last = vec![u32::MAX; k];
+                let mut far = (f32::NEG_INFINITY, 0_usize);
                 for t0 in (0..m).step_by(TILE) {
                     let mt = TILE.min(m - t0);
                     let dots = centroid_dots(yr, &xc[t0 * d..(t0 + mt) * d], mt, d);
@@ -1358,118 +1339,93 @@ fn lloyd_step(x: &[f32], n: usize, d: usize, k: usize, y: &mut [f32], rng: &mut 
                                 best = (score, c);
                             }
                         }
-                        let c = best.1;
                         let row = &xc[(t0 + tt) * d..(t0 + tt + 1) * d];
+                        let self_sq: f32 = row.iter().map(|v| v * v).sum();
+                        let dist = (self_sq + best.0).max(0.0);
+                        if dist > far.0 {
+                            far = (dist, ci * chunk + t0 + tt);
+                        }
+                        let c = best.1;
                         for (s, &v) in sums[c * d..(c + 1) * d].iter_mut().zip(row) {
                             *s += f64::from(v);
                         }
                         counts[c] += 1;
-                        last[c] = (ci * chunk + t0 + tt) as u32;
                     }
                 }
-                (sums, counts, last)
+                (sums, counts, far)
             })
             .collect()
     };
     let mut sums = vec![0.0_f64; k * d];
     let mut counts = vec![0_u64; k];
-    let mut last = vec![u32::MAX; k];
-    for (s, c, l) in parts {
-        for (a, b) in sums.iter_mut().zip(&s) {
+    let mut far = (f32::NEG_INFINITY, 0_usize);
+    for (s, c, f) in &parts {
+        for (a, b) in sums.iter_mut().zip(s) {
             *a += b;
         }
-        for c2 in 0..k {
-            counts[c2] += c[c2];
-            if l[c2] != u32::MAX {
-                last[c2] = l[c2];
-            }
+        for (a, b) in counts.iter_mut().zip(c) {
+            *a += b;
+        }
+        if f.0 > far.0 {
+            far = *f;
         }
     }
+    let before: Vec<f32> = y.to_vec();
     for c in 0..k {
         if counts[c] > 0 {
             for t in 0..d {
                 y[c * d + t] = (sums[c * d + t] / counts[c] as f64) as f32;
             }
-        }
-    }
-    let live: Vec<usize> = (0..k).rev().filter(|&c| counts[c] >= 2).collect();
-    let mut next = 0;
-    for c in 0..k {
-        if counts[c] != 0 {
-            continue;
-        }
-        let j = if next < live.len() {
-            next += 1;
-            last[live[next - 1]] as usize
         } else {
-            rng.random_range(0..n)
-        };
-        y[c * d..(c + 1) * d].copy_from_slice(&x[j * d..(j + 1) * d]);
-    }
-}
-
-/// Inverse of the ridge matrix of a single batch variable, an arrow matrix
-/// (intercept row and column, diagonal elsewhere), in the reference's
-/// closed form.
-fn arrow_inverse(cov: &[f64], sz: usize) -> Vec<f64> {
-    let b0 = cov[0];
-    let mut acb = vec![0.0_f64; sz];
-    let mut bv = vec![0.0_f64; sz];
-    let mut u = b0;
-    acb[0] = 1.0;
-    for i in 1..sz {
-        bv[i] = 1.0 / cov[i * sz + i];
-        let ac = -cov[i];
-        u -= ac * ac * bv[i];
-        acb[i] = ac * bv[i];
-    }
-    let mut inv = vec![0.0_f64; sz * sz];
-    for r in 0..sz {
-        for c in 0..sz {
-            inv[r * sz + c] = acb[r] * acb[c] / u;
+            y[c * d..(c + 1) * d].copy_from_slice(&x[far.1 * d..(far.1 + 1) * d]);
         }
-        inv[r * sz + r] += bv[r];
     }
-    inv
+    y != before.as_slice()
 }
 
-/// Inverse by Gauss-Jordan elimination with partial pivoting; `None` if the
-/// matrix is singular.
-fn invert(a: &[f64], n: usize) -> Option<Vec<f64>> {
-    let mut m = a.to_vec();
-    let mut inv = vec![0.0_f64; n * n];
-    for i in 0..n {
-        inv[i * n + i] = 1.0;
-    }
+/// Solve `A X = B` (`A` `n × n`, `B` `n × m`, row-major) by Gaussian
+/// elimination with partial pivoting; `None` if `A` is singular.
+fn solve_dense(a: &[f64], n: usize, b: &[f64], m: usize) -> Option<Vec<f64>> {
+    let mut a = a.to_vec();
+    let mut x = b.to_vec();
     for col in 0..n {
         let piv =
-            (col..n).max_by(|&i, &j| m[i * n + col].abs().total_cmp(&m[j * n + col].abs()))?;
-        let p = m[piv * n + col];
+            (col..n).max_by(|&i, &j| a[i * n + col].abs().total_cmp(&a[j * n + col].abs()))?;
+        let p = a[piv * n + col];
         if p == 0.0 || !p.is_finite() {
             return None;
         }
         if piv != col {
             for t in 0..n {
-                m.swap(piv * n + t, col * n + t);
-                inv.swap(piv * n + t, col * n + t);
+                a.swap(piv * n + t, col * n + t);
+            }
+            for t in 0..m {
+                x.swap(piv * m + t, col * m + t);
             }
         }
-        for t in 0..n {
-            m[col * n + t] /= p;
-            inv[col * n + t] /= p;
-        }
-        for r in 0..n {
-            let f = m[r * n + col];
-            if r == col || f == 0.0 {
+        for r in col + 1..n {
+            let f = a[r * n + col] / p;
+            if f == 0.0 {
                 continue;
             }
-            for t in 0..n {
-                m[r * n + t] -= f * m[col * n + t];
-                inv[r * n + t] -= f * inv[col * n + t];
+            for t in col..n {
+                a[r * n + t] -= f * a[col * n + t];
+            }
+            for t in 0..m {
+                x[r * m + t] -= f * x[col * m + t];
             }
         }
     }
-    Some(inv)
+    for col in (0..n).rev() {
+        for t in 0..m {
+            let mut v = x[col * m + t];
+            for c in col + 1..n {
+                v -= a[col * n + c] * x[c * m + t];
+            }
+            x[col * m + t] = v / a[col * n + col];
+        }
+    }
+    Some(x)
 }
 
 #[cfg(test)]
@@ -1571,8 +1527,8 @@ mod tests {
 
     #[test]
     fn two_cells_in_two_variables_move_closer_without_crossing() {
-        // harmonypy 2.0.2's check against R harmony 2.0.4 (#54): one cluster,
-        // lambda 0.5, the cells in labs A, B and on days 1, 2.
+        // The ridge regression of two cells by hand: one cluster, lambda 0.5,
+        // the cells in labs A, B and on days 1, 2.
         let z = [1.0_f32, 2.0];
         let lab = [0_u32, 1];
         let day = [0_u32, 1];
@@ -1610,58 +1566,24 @@ mod tests {
     }
 
     #[test]
-    fn the_closed_form_inverse_is_the_inverse() {
-        let sz = 4;
-        let o = [3.0, 1.5, 0.75];
-        let mut cov = vec![0.0; sz * sz];
-        cov[0] = o.iter().sum();
-        for i in 0..3 {
-            cov[i + 1] = o[i];
-            cov[(i + 1) * sz] = o[i];
-            cov[(i + 1) * sz + i + 1] = o[i] + 0.2 * (i as f64 + 1.0);
+    fn the_ridge_solvers_agree_and_a_rise_counts_as_converged() {
+        let a = [4.0, 1.0, 2.0, 1.0, 3.0, 0.5, 2.0, 0.5, 5.0];
+        let x = solve_dense(&a, 3, &[1.0, 2.0, 3.0], 1).unwrap();
+        let back: Vec<f64> = (0..3)
+            .map(|i| (0..3).map(|j| a[i * 3 + j] * x[j]).sum())
+            .collect();
+        for (u, v) in back.iter().zip([1.0, 2.0, 3.0]) {
+            assert!((u - v).abs() < 1e-12, "{back:?}");
         }
-        let a = arrow_inverse(&cov, sz);
-        let b = invert(&cov, sz).unwrap();
-        for (x, y) in a.iter().zip(&b) {
-            assert!((x - y).abs() < 1e-12, "{x} vs {y}");
-        }
-    }
-
-    #[test]
-    fn convergence_needs_a_small_decrease() {
-        // harmonypy 2.0.2's table.
-        let nan = f64::NAN;
-        let inf = f64::INFINITY;
-        for &(old, new, eps, want) in &[
-            (100.0, 101.0, 0.01, false),
-            (100.0, 99.5, 0.01, true),
-            (100.0, 90.0, 0.01, false),
-            (100.0, 99.0, 0.01, false),
-            (-100.0, -100.5, 0.01, true),
-            (-100.0, -99.0, 0.01, false),
-            (0.0, 0.0, 0.01, true),
-            (0.0, 1.0, 0.01, false),
-            (0.0, -1.0, 0.01, false),
-            (nan, 1.0, 0.01, false),
-            (1.0, nan, 0.01, false),
-            (inf, 1.0, 0.01, false),
-            (1.0, inf, 0.01, false),
-            (-inf, 1.0, 0.01, false),
-            (1.0, -inf, 0.01, false),
-            (1.0, 1.0, nan, false),
-        ] {
-            assert_eq!(
-                objective_converged(old, new, eps),
-                want,
-                "{old} {new} {eps}"
-            );
-        }
+        assert!(solve_dense(&[1.0, 2.0, 2.0, 4.0], 2, &[1.0, 1.0], 1).is_none());
+        assert!(relative_drop(100.0, 101.0) < 0.0);
+        assert!((relative_drop(100.0, 99.5) - 0.005).abs() < 1e-12);
+        assert!((relative_drop(-100.0, -100.5) - 0.005).abs() < 1e-12);
     }
 
     #[test]
     fn log_space_assignments_equal_the_weighted_softmax() {
-        // harmonypy's check: exp(-dist/σ) times ((2E + 1)/(O + E + 1))^θ per
-        // batch of the cell, normalised.
+        // exp(-dist/σ) times the diversity weight to the power θ, normalised.
         let dist = [0.2_f32, 1.2, 0.8];
         let dots: Vec<f32> = dist.iter().map(|&x| 1.0 - x / 2.0).collect();
         let ratio = [1.3_f32, 0.6, 2.1];
@@ -1704,7 +1626,7 @@ mod tests {
 
     #[test]
     fn several_variables_give_finite_coordinates() {
-        // harmonypy's lab-and-day check: 120 cells, two labs, three days.
+        // A lab-and-day design: 120 cells, two labs, three days.
         let d = 5;
         let mut rng = ChaCha8Rng::seed_from_u64(0);
         let z: Vec<f32> = (0..120 * d)

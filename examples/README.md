@@ -14,9 +14,9 @@ any folder.
 | `06_large_run.py` | one large dataset (one file or many) end to end, with a run report | your files; with none it runs on the small test file |
 
 ```bash
-pip install polariseq
 git clone https://github.com/DarkOxygen123/Polariseq.git polariseq
 cd polariseq
+pip install ".[plot,anndata]"   # builds Polariseq with the extras the examples use (../INSTALL.md)
 python examples/01_quickstart.py
 python examples/02_full_workflow.py
 python examples/03_large_data_out_of_core.py /path/to/your.h5ad
@@ -60,7 +60,7 @@ python examples/06_large_run.py /data/atlas.h5ad --out runs/atlas \
     --project /scratch/$USER/polariseq-atlas --ram-gb 64 --threads 16
 ```
 
-To get Polariseq running on a node where `pip install polariseq` is not an
+To get Polariseq running on a node where installing with pip from GitHub is not an
 option (clone, virtual environment, build, or an offline wheel), to size a run,
 to run it under a scheduler and to read the logs, see
 [`NODE_SETUP.md`](NODE_SETUP.md). `setup_node.sh` does the setup in one command.

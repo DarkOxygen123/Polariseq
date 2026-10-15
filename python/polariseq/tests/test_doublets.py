@@ -100,6 +100,7 @@ def test_normalized_counts_are_refused_in_memory(path):
 
 
 def test_the_distribution_plot_draws(path):
+    pytest.importorskip("matplotlib")
     import matplotlib
 
     matplotlib.use("Agg")

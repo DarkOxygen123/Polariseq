@@ -8,6 +8,14 @@ folders:
 | `benchmarks/` | every script that produced a measurement: data preparation, the benchmark harness, the campaigns and the follow-up analyses |
 | `results/` | the measured tables, small enough for git (about 2.4 MB). [results/README.md](results/README.md) describes each file and the script that wrote it |
 
+Inside `benchmarks/`, three folders hold the runs on whole atlases and of the current version:
+
+| folder | what |
+|---|---|
+| `benchmarks/atlas/` | Polariseq, Scarf and BPCells on the 22.2 million cells of scTab, and Polariseq on the 95.6 million cells of Tahoe-100M: the drivers, the shared parameters (`params.json`), the monitor, the scoring, the Tahoe-100M download and conversion, and the environments (`envs/`) |
+| `benchmarks/relicence/` | the checks of the rewritten Leiden, Harmony and pseudobulk modules against the earlier code and the reference tools, and the runs of the current version on the laptop, Windows and the compute node (`cluster/`); its README records every comparison |
+| `benchmarks/windows/` | the Windows runs of the current version (PowerShell) |
+
 The input datasets are public but large, so they are not stored here. Section 2
 says how to download and prepare each one. Every script writes its raw output
 under `benchmarks/results/`, which git ignores. The tables in `results/` were
@@ -23,7 +31,7 @@ cd polariseq
 python3 -m venv .venv
 source .venv/bin/activate                      # Windows: .venv\Scripts\activate
 pip install -r benchmarks/requirements.txt     # the pinned tool versions used for the runs
-pip install polariseq==0.1.0                   # or, to build this checkout: maturin develop --release
+pip install .                                  # builds Polariseq from this checkout (prerequisites: INSTALL.md)
 ```
 
 The pins in `benchmarks/requirements.txt` are the versions the runs used
@@ -143,6 +151,41 @@ which install on Linux and macOS only (on Windows, use WSL2 and copy the files
 over). The result is 100 `.h5ad` files, 22,190,622 cells, 19,331 genes and
 46.2 billion stored values (about 350 GB).
 
+### Tahoe-100M (95.6 million cells, 14 plates)
+
+Zhang et al. (2025), on Hugging Face as
+[`tahoebio/Tahoe-100M`](https://huggingface.co/datasets/tahoebio/Tahoe-100M): 3,388 parquet files, each one
+sub-library of one plate, about 1,077 stored values per cell. The scripts are in `benchmarks/atlas/` and run in
+the environment `py-score` (section 3, "Whole atlases"). Set the working folder `B` (about 1.2 TB free at the
+peak) and `REPO`, this clone:
+
+```bash
+export B=/path/to/working/folder REPO=$PWD
+mkdir -p $B/showdown/data $B/showdown/logs
+python benchmarks/atlas/tahoe_index.py --out $B/showdown/data/tahoe_files.csv     # reads each file's footer only
+```
+
+The index gives each file's plate, sub-library and number of cells. Plates 9 and 13 come first, as in the reported
+run, so that their cells are shards 0 to 13; then the other twelve plates, converted into
+shards from 14 on beside them:
+
+```bash
+python benchmarks/atlas/tahoe_fetch.py --plates plate9,plate13 --index $B/showdown/data/tahoe_files.csv \
+    --out $B/data/tahoe/tahoe-A/parquet --parallel 8
+sbatch -J tahoe-A-h5ad -c 16 --mem=170G -t 12:00:00 -o %x-%j.out \
+    benchmarks/atlas/run_tool.sh tahoe-h5ad tahoe-A $B/data/tahoe/tahoe-A/parquet
+python benchmarks/atlas/tahoe_fetch.py \
+    --plates plate1,plate2,plate3,plate4,plate5,plate6,plate7,plate8,plate10,plate11,plate12,plate14 \
+    --index $B/showdown/data/tahoe_files.csv --out $B/data/tahoe/tahoe-all/parquet --parallel 8
+sbatch benchmarks/atlas/tahoe_all/convert.sbatch
+```
+
+`tahoe_fetch.py` downloads on the machine it runs on (a login node, where compute nodes have no internet),
+checks every file and can be rerun; the conversion deletes the parquet files shard by shard. One file,
+`train-00446-of-03388.parquet`, holds cells of two plates and is selected by no plate name; the other 3,387
+files hold the 95,596,109 cells analysed, and `convert.sbatch` stops unless `$B/data/tahoe/tahoe-all/h5ad`
+holds 97 shards and exactly that many cells (about 1 TB).
+
 ## 3. Run the benchmarks
 
 Two machines were used, and each table in `results/` says which:
@@ -224,6 +267,79 @@ published cell type). Score the clusters against the published types with:
 python benchmarks/r4_score_22m.py OUT_FOLDER --out score_22m.json
 ```
 
+### Whole atlases: three tools on scTab, Polariseq on Tahoe-100M
+
+Each tool is installed the way a user installs it, in its own environment under `$B/envs/`, with the
+versions pinned in `benchmarks/atlas/envs/` (`py-polariseq`, `py-scarf`, `py-score`, `py-scanpy`, `r` for
+BPCells; each file says how to create it). Every run goes through `benchmarks/atlas/run_tool.sh`, which
+converts the input to the tool's own store, runs the analysis under `monitor.py` (time and memory of every
+step, the whole process tree, twice a second), scores the result against the published labels and deletes
+the store. All tools use the parameters in `benchmarks/atlas/params.json`: cells with at least 200 genes,
+genes in at least 3 cells, 10,000 counts per cell and log, 2,000 genes, 50 components, 15 neighbours,
+Leiden at resolution 1.0, seed 0, UMAP for 200 rounds (BPCells has no UMAP). The docstring of each
+`drv_*` script gives that tool's steps.
+
+scTab, the three tools one after another (the reported runs: 12 cores and 100 GB on a shared node,
+Polariseq with a 90 GB budget):
+
+```bash
+export B=/path/to/working/folder REPO=$PWD LABEL_COL=cell_type BATCH_COLS=dataset_id,donor_id
+IN=$PWD/benchmarks/results/scTab/h5ad
+O="-c 12 --mem=100G -t 4-00:00:00 -o %x-%j.out"
+JT=$(sbatch --parsable -J truth-scTab $O benchmarks/atlas/run_tool.sh truth scTab-22M $IN)
+JP=$(sbatch --parsable -J ps-scTab --dependency=afterok:$JT $O benchmarks/atlas/run_tool.sh polariseq scTab-22M $IN)
+JS=$(sbatch --parsable -J scarf-scTab --dependency=afterany:$JP $O benchmarks/atlas/run_tool.sh scarf scTab-22M $IN)
+JB=$(sbatch --parsable -J bpcells-scTab --dependency=afterany:$JS $O benchmarks/atlas/run_tool.sh bpcells scTab-22M $IN)
+sbatch -J compare-scTab --dependency=afterany:$JB -c 4 --mem=32G -t 2:00:00 -o %x-%j.out \
+    benchmarks/atlas/run_tool.sh compare scTab-22M $IN
+```
+
+Results go to `$B/showdown/results/scTab-22M/<tool>/`: `run.monitor.json` (time and peak memory of every
+step), `art/` (each cell's cluster and UMAP position, by its row in the input files), `score.json`
+(agreement with the published types) and, from the last job, `compare.json` (agreement between the tools).
+A run that fails is repeated once; `RESUME_RUN=1` repeats only the analysis and keeps the converted store.
+`python benchmarks/figures/v020_showdown22m_derive.py $B/showdown/results/scTab-22M OUT` writes, per tool,
+which published types were recovered as a cluster of their own, kept in a shared cluster or split.
+
+Tahoe-100M, Polariseq only, with `examples/06_large_run.py` (16 cores, 170 GB, a 150 GB budget), then the
+scores (agreement with the 50 cell lines, clusters held mostly by one plate) and the UMAP rasters by cell
+line, cluster and plate:
+
+```bash
+J=$(sbatch --parsable benchmarks/atlas/tahoe_all/run.sbatch)
+sbatch --dependency=afterok:$J benchmarks/atlas/tahoe_all/score.sbatch
+sbatch --dependency=afterok:$J benchmarks/atlas/tahoe_all/raster.sbatch
+python benchmarks/figures/tahoe_organ_proximity.py $B/showdown/results/tahoe-all/polariseq/rasters \
+    benchmarks/atlas/tahoe_all/cell_lines.csv organ_proximity.csv
+```
+
+`cell_lines.csv` gives each cell line's name and organ of origin, from Tahoe-100M's cell-line metadata.
+These runs used the Polariseq releases of their time, 0.1.0 for scTab and 0.1.1 for Tahoe-100M; the
+current version runs the same steps, with the rewritten Leiden described in `CHANGELOG.md`.
+
+### The current version: the rewritten modules and every run again
+
+`benchmarks/relicence/README.md` describes how Leiden, Harmony and the pseudobulk test were rewritten and
+checked, with the numbers of every comparison. The scripts in that folder: `leiden_compare.py`,
+`harmony_compare.py` and `pseudobulk_check.py` (with `pseudobulk_reference.R` for edgeR and limma) for the
+three modules; `v020_seed_spread.py` (seed-to-seed spread), `v020_agreement.py` (agreement of the tools),
+`v020_fetal_resolutions.py` (the fetal atlas at several resolutions), `v020_downstream_paris.py` (PAGA and
+Paris on Polariseq's output) and `planner_v020_check.py` (the planner against measurement). Each script's
+docstring gives its inputs and outputs. The runs themselves:
+
+| where | command |
+|---|---|
+| laptop | `bash benchmarks/relicence/run_laptop_final.sh` and `bash benchmarks/relicence/run_laptop_series_v020.sh` |
+| Windows | `benchmarks\windows\run_v020.ps1` and `run_series_v020.ps1` (PowerShell; `setup.ps1` builds the environment) |
+| compute node | the job scripts in `benchmarks/relicence/cluster/`, submitted one at a time by `cluster/launch.sh` |
+
+The job scripts are kept as they ran, with the working folder as `$B`: they expect the prepared datasets in
+`$B/data/paper/validation_data/` and `$B/data/paper/fetal_data/` (section 2), the environments in `$B/envs/`
+(`py-polariseq-020` and `py-polariseq-020-final` hold the current version, `py-polariseq-011` the earlier
+release, `py-scanpy` Scanpy), and write to `$B/runs/v020/`. The Windows scripts fetch the two prepared
+datasets with scp when `POLARISEQ_DATA_HOST` and `POLARISEQ_DATA_DIR` name a machine that has them; otherwise
+copy them into `benchmarks/results/` first.
+
 ### Cell types, embeddings and the other analyses
 
 | question | command |
@@ -257,6 +373,9 @@ first.
 
 ## Citation and licence
 
-Polariseq is released under GPL-3.0-or-later (see `LICENSE`). The datasets
-belong to their authors: cite 10x Genomics, Cao et al. 2020, Kang et al. 2018
-and Fischer et al. 2024 when you use them.
+Polariseq is released under the PolyForm Noncommercial License 1.0.0 with
+additional terms (see `LICENSE`): free for noncommercial use, cite Polariseq
+(`CITATION.cff`), commercial use by agreement with the authors
+(trayambak@iitmandi.ac.in). The datasets belong to their authors: cite 10x
+Genomics, Cao et al. 2020, Kang et al. 2018, Fischer et al. 2024 and Zhang
+et al. 2025 (Tahoe-100M) when you use them.

@@ -57,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--allow-battery", action="store_true")
     ap.add_argument("--stage", choices=sorted({s[0] for s in STAGES}), help="run only this stage")
     ap.add_argument("--control", action="store_true", help="the published workflow, a few points")
-    ap.add_argument("--umap", action="store_true", help="with UMAP (Fig. 3 of revision 4)")
+    ap.add_argument("--umap", action="store_true", help="with UMAP")
     a = ap.parse_args(argv)
     stages = [s for s in STAGES if a.stage in (None, s[0])]
     if a.control:

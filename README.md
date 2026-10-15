@@ -1,59 +1,144 @@
-# Polariseq
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DarkOxygen123/Polariseq/main/docs/assets/banner-dark.svg">
+    <img src="https://raw.githubusercontent.com/DarkOxygen123/Polariseq/main/docs/assets/banner-light.svg" alt="Polariseq. Atlas-scale single-cell analysis on the computer you have." width="100%">
+  </picture>
+</p>
 
-Fast, memory-aware single-cell RNA-seq analysis, from a laptop to atlas scale.
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.10%E2%80%933.14-3E7FC1?labelColor=2E3340" alt="Python 3.10 to 3.14">
+  <img src="https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-3E7FC1?labelColor=2E3340" alt="macOS, Linux and Windows">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-3E7FC1?labelColor=2E3340" alt="PolyForm Noncommercial 1.0.0"></a>
+  <a href="https://github.com/DarkOxygen123/Polariseq/actions"><img src="https://img.shields.io/github/actions/workflow/status/DarkOxygen123/Polariseq/ci.yml?branch=main&label=CI&labelColor=2E3340" alt="CI status"></a>
+</p>
 
-Polariseq is a Python package with a Rust core. It runs the standard
-single-cell analysis (quality control, normalization, gene selection, PCA,
-neighbor graph, Leiden clustering, UMAP, marker genes) through a Scanpy-shaped
-API, and decides before reading any data whether the analysis fits in memory
-or should run out of core. The same steps run in both modes.
+<p align="center">
+  <a href="#install"><b>Install</b></a> &nbsp;·&nbsp;
+  <a href="#quick-start"><b>Quick start</b></a> &nbsp;·&nbsp;
+  <a href="#examples"><b>Examples</b></a> &nbsp;·&nbsp;
+  <a href="#what-it-does"><b>What it does</b></a> &nbsp;·&nbsp;
+  <a href="https://github.com/DarkOxygen123/Polariseq/tree/reproduce"><b>Reproduce</b></a>
+</p>
 
-- **Plans before it reads.** `ps.plan("data.h5ad")` reads only the file's
-  description and predicts the peak memory of every step and the disk the run
-  will use.
-- **In memory or out of core, chosen for you.** A matrix that fits in half of
-  the memory budget is analyzed in memory. A larger one is copied once into a
-  compact block store on disk and read in blocks sized to the budget.
-- **Defaults made for large atlases.** Genes are ranked among those detected
-  in more than 1% of cells, and UMAP starts from a multilevel spectral layout
-  that takes seconds on millions of cells.
-- **No system dependencies.** HDF5 is built into the package. macOS, Linux and
-  Windows.
+Polariseq analyzes single-cell RNA-seq data from raw counts to clusters, UMAP, marker genes and comparisons between
+conditions. It is a Python package with a Rust core that plans before it reads: from a file's description it predicts
+the memory and disk each step needs, then runs in memory when the matrix fits and out of core when it does not, with
+the same steps in both modes. A few million cells fit on an everyday computer and tens of millions on one server node.
+
+## Optimizations
+
+| Optimization | What it does |
+|---|---|
+| **Compact block store** | Out of core, the counts are copied once into a lossless layout of little more than one byte per stored value (a plain layout takes eight). Results are identical to those from the plain layout, and every chunk carries a checksum. |
+| **Memory budget** | `ps.set_budget` fixes memory and threads, blocks are sized to it, and `ps.plan` reports the peak of every step before anything runs. |
+| **Parallel file reading** | The compressed chunks of an `.h5ad` file are inflated across all cores while the file loads. |
+| **Vectorized kernels** | PCA, the neighbor graph and UMAP share kernels with a fixed summation order, so results repeat from run to run. |
+
+## Algorithms and implementation
+
+| Method | Based on | Implementation |
+|---|---|---|
+| **Multilevel spectral UMAP initialization** | New | Computes the spectral embedding on a coarse graph of cell groups, lifts it to individual cells and refines it on the full graph. Initializes millions of cells in seconds and captures the large-scale structure of the dataset. |
+| **Atlas-tuned defaults** | New | Selects highly variable genes among those detected in more than 1% of cells, renormalizes each cell over the selected genes and standardizes genes before PCA. |
+| **Paris hierarchy** | scikit-network; Scarf (balanced cut) | Reproduces the reference bit for bit. Sorted adjacency vectors, extended in order as clusters merge, avoid hash tables, and a single nearest-neighbor-chain pass yields the full dendrogram, from which clusters at any resolution are cut. |
+| **Leiden** | Traag, Waltman and van Eck (2019); CWTS networkanalysis | Array-based throughout: dense scratch buffers with touched-entry lists in place of hash maps, and reduced graphs built by counting sort with node weights carried as sums. A single seeded random stream makes results reproducible for a given graph and seed. |
+| **Harmony** | Korsunsky et al. (2019); harmony-pytorch; R harmony's documented options | Computes centroid distances in tiles, so the soft assignments are the only working array the size of the data. Tallies and ridge systems use double precision, and results are independent of the thread count. Corrections agree with harmonypy's as closely as its own runs with different seeds. |
+| **Scrublet** | Scrublet | Represents simulated doublets implicitly, as rescaled sums of their parents' projections, keeping memory at 30 values per cell. Lanczos PCA and parallel batch scoring process 443,797 cells (141 batches, 8 cores) in 22 s, against 71 s for the reference on 8 processes. |
+| **Pseudobulk testing** | The edgeR and limma methods (Robinson and Oshlack 2010; Smyth 2004; Phipson et al. 2016) | Gives edgeR's and limma's results: the same genes and p-values within 1e-11 on 350 generated datasets. Streams raw counts once, from memory or the block store, and aggregates them per replicate, condition and cell type before limma-trend testing with donors as replicates. |
+| **Randomized PCA** | Halko, Martinsson and Tropp (2011) | Implicit mean-centering keeps the matrix sparse throughout; an exact solver handles the selected-gene matrix. |
+| **NN-Descent** | pynndescent | Random-projection-forest initialization with a bounded copy per subtree, and block-bounded memory; the resulting graph is identical at any thread count. Exact search is used for smaller datasets. |
+| **UMAP** | umap-learn | Builds the fuzzy graph once as a symmetric sparse matrix shared by initialization and optimization. Optimization is multithreaded; `deterministic=True` gives bit-reproducible layouts. |
+
+Reference implementations are credited in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+## An atlas on a laptop
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DarkOxygen123/Polariseq/main/docs/assets/hero_dark.png">
+    <img src="https://raw.githubusercontent.com/DarkOxygen123/Polariseq/main/docs/assets/hero_light.png" alt="UMAP of the 4.06 million cells of the human fetal atlas, coloured by cell type, with the laptop time and memory" width="100%">
+  </picture>
+  <br>
+  <sub>Polariseq with default settings on the human fetal atlas (Cao et al. 2020). Laptop figures: out of core, 8 GB
+  laptop, median of 3 runs (table below).</sub>
+</p>
 
 | dataset | cells | machine | time | peak resident memory |
 |---|---:|---|---:|---:|
-| mouse brain (10x Genomics) | 1.3 million | laptop, 8 GB, 4 threads | 3.3 min | 3.1 GB |
-| human fetal atlas (Cao et al. 2020) | 4.06 million | laptop, 8 GB, 4 threads | 5.3 min | 3.8 GB |
+| mouse brain (10x Genomics) | 1.3 million | laptop, 8 GB, 4 threads | 3.6 min | 3.2 GB |
+| human fetal atlas (Cao et al. 2020) | 4.06 million | laptop, 8 GB, 4 threads | 5.9 min | 4.2 GB |
 
 Quality control through clustering, out of core, default settings, 6 GB
 budget, median of 3 runs. Peak resident memory is the memory the budget
 governs. The macOS physical footprint, which also counts memory the system
-compressed, peaked at 3.9 GB and 6.2 GB. The benchmark scripts and their results are on the
+compressed, peaked at 3.9 GB and 5.7 GB. The benchmark scripts and their results are on the
 [`reproduce`](https://github.com/DarkOxygen123/Polariseq/tree/reproduce)
 branch.
 
 ## Install
 
+Polariseq is installed from this repository with pip, which compiles its Rust core during installation:
+
 ```bash
-pip install polariseq
+pip install "git+https://github.com/DarkOxygen123/Polariseq.git"
 ```
 
-Python 3.10 to 3.14 on macOS (Apple Silicon or Intel), Linux (x86_64) or
-Windows (x86_64). Check the install:
+Python 3.10 to 3.14 on macOS, Linux or Windows. The build needs the stable Rust toolchain, a C compiler and
+CMake 3.16 or newer, which builds the HDF5 library into the package. pip fetches CMake, and Rust when it is
+missing, by itself; the C compiler is the one tool to have installed (macOS: `xcode-select --install`;
+Windows: Build Tools for Visual Studio; Linux: usually present). The first build takes a few minutes. Check
+the install:
 
 ```bash
 python -c "import polariseq as ps; print(ps.__version__); print(ps.resources())"
 ```
 
-Optional extras:
+### What each install gives you
+
+**The core**, `pip install "git+https://github.com/DarkOxygen123/Polariseq.git"`, is the whole analysis,
+with NumPy and pandas as its only Python dependencies:
+
+- **Reading:** `.h5ad`, 10x `.h5` and 10x MatrixMarket folders; one file, or several analysed as one dataset.
+- **Planning:** `ps.plan` predicts the memory and disk of every step before reading; the analysis runs in
+  memory or out of core.
+- **Analysis:** quality control, cell and gene filters, normalization, gene selection, PCA, the neighbour
+  graph, Leiden and Louvain clustering, UMAP, the Paris hierarchy and PAGA; `ps.process_diskbacked` runs
+  it in one call.
+- **Biology:** marker genes (`ps.get.markers`), gene scores, cluster annotation from built-in marker lists,
+  merging and subclustering, pseudotime.
+- **Several samples:** doublet detection (Scrublet), integration (Harmony), and comparisons between
+  conditions with donors as replicates.
+- **Results:** cell and gene tables, clusters, UMAP coordinates and marker lists as pandas and NumPy
+  objects, ready to save.
+
+It suits a server, a pipeline or any run where the numbers are what you need. Figures, export to AnnData and
+SciPy matrices come with the extras below; a function that needs one names the extra to add.
+
+**The extras** add one purpose each, named in brackets:
+
+| extra | installs | lets you |
+|---|---|---|
+| `plot` | Matplotlib | draw every figure with `ps.pl`: UMAPs by cluster or gene, dot plots, violins, heatmaps, volcano plots, QC and overview figures, in a light or dark theme |
+| `anndata` | AnnData, SciPy | export with `adata.to_anndata()` or to `.h5ad`, and continue in Scanpy, scVI or any tool built on AnnData |
+| `scipy` | SciPy | take results as SciPy sparse matrices (the neighbour graph in `adata.obsp`, `.to_scipy()`, `adata.sample()`) for code that expects them |
+| `celltypist` | CellTypist, AnnData, SciPy | annotate cell types with CellTypist's trained models: `ps.tl.auto_annotate(adata, method="celltypist")` |
+
+**Everything**, `pip install "polariseq[all] @ git+https://github.com/DarkOxygen123/Polariseq.git"`, is
+the core with every extra: Matplotlib, AnnData, SciPy and CellTypist. It suits notebook work with figures
+and the hand-over to Scanpy, and it is the largest install, since CellTypist brings Scanpy and
+scikit-learn.
+
+**Most people need part of it:**
 
 ```bash
-pip install "polariseq[annotation]"    # export to AnnData (adata.to_anndata())
-pip install "polariseq[celltypist]"    # CellTypist cell-type annotation
-pip install "polariseq[interactive]"   # interactive plotly figures
+pip install "polariseq[plot] @ git+https://github.com/DarkOxygen123/Polariseq.git"           # the analysis and its figures (the quick start below)
+pip install "polariseq[plot,anndata] @ git+https://github.com/DarkOxygen123/Polariseq.git"   # and the hand-over to Scanpy (every example script)
 ```
 
-Building from source, offline installs and cluster nodes: [INSTALL.md](INSTALL.md).
+An extra can be added later with the same command.
+
+Each operating system step by step, older Linux systems (CentOS 7 and its kind), cluster nodes, offline
+machines, and the complete build from source with the tests: [INSTALL.md](INSTALL.md).
 
 ## Quick start
 
@@ -80,7 +165,7 @@ ps.tl.umap(adata)
 
 ps.tl.rank_genes_groups(adata, groupby="leiden")
 print(ps.get.markers(adata, n=5))   # top marker genes of each cluster
-ps.pl.umap(adata, color="leiden", show=False, save="umap.png")
+ps.pl.umap(adata, color="leiden", show=False, save="umap.png")   # figures: the plot extra
 ```
 
 The same code runs in memory or out of core; `ps.read_h5ad(path,
@@ -90,7 +175,10 @@ mode="memory")` or `mode="out-of-core"` fixes the mode. Other inputs:
 `ps.read_h5ad(["donor1.h5ad", "donor2.h5ad"])`, is analyzed as one dataset,
 with each cell's file in `adata.obs["dataset"]`.
 
-### The whole analysis in one call, out of core
+<details>
+<summary><b>The whole analysis in one call, out of core</b></summary>
+
+<br>
 
 `ps.process_diskbacked` runs quality control, the cell and gene filters,
 normalization, gene selection, PCA, the neighbor graph and Leiden clustering
@@ -110,7 +198,7 @@ adata = ps.process_diskbacked(
     n_hvg=2000, n_pcs=50, n_neighbors=15, resolution=1.0,
 )
 ps.tl.umap(adata)                     # UMAP runs on the result
-ps.pl.umap(adata, color="leiden", show=False, save="umap.png")
+ps.pl.umap(adata, color="leiden", show=False, save="umap.png")   # figures: the plot extra
 ```
 
 It applies the same steps, filters and defaults as the step-by-step code above
@@ -124,6 +212,32 @@ filters default to keeping every cell and gene; set `min_genes` and
 `min_cells` as in the step-by-step code. Further options: `target_sum`,
 `max_genes`, `min_counts`, `max_counts`, `max_pct_mt`, `mito_prefix`, `seed`;
 `help(ps.process_diskbacked)` lists them.
+
+</details>
+
+## Figures from the package
+
+Every figure below comes from `ps.pl`, in the default light theme and in the
+dark theme (`ps.pl.set_theme("dark")`).
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DarkOxygen123/Polariseq/main/docs/assets/genes_dark.png">
+    <img src="https://raw.githubusercontent.com/DarkOxygen123/Polariseq/main/docs/assets/genes_light.png" alt="UMAPs colored by the expression of four genes" width="100%">
+  </picture>
+  <br><sub><code>ps.pl.umap</code>: gene expression on the embedding</sub>
+</p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DarkOxygen123/Polariseq/main/docs/assets/dotplot_dark.png">
+    <img src="https://raw.githubusercontent.com/DarkOxygen123/Polariseq/main/docs/assets/dotplot_light.png" alt="Dot plot of marker genes by cell type" width="560">
+  </picture>
+  <br><sub><code>ps.pl.dotplot</code>: marker genes by cell type</sub>
+</p>
+
+Dot plots, violins, heatmaps, volcano plots and multi-panel figures are shown
+in [`examples/04_plotting.py`](examples/04_plotting.py).
 
 ## Examples
 
@@ -143,7 +257,7 @@ paths there and run it.
 ```bash
 git clone https://github.com/DarkOxygen123/Polariseq.git polariseq
 cd polariseq
-pip install polariseq
+pip install ".[plot,anndata]"     # 01 and 03 need the core only; 02, 04 and 06 the plot extra; 05 plot and anndata
 python examples/01_quickstart.py
 ```
 
@@ -188,11 +302,29 @@ Open an issue at <https://github.com/DarkOxygen123/Polariseq/issues> with what
 you ran, what happened, and the output of
 `python -c "import polariseq as ps; print(ps.get_build_info())"`.
 
+## Citation
+
+If you use Polariseq, or results produced with it, cite it with the version you used. The citation is in
+[CITATION.cff](CITATION.cff), and GitHub's "Cite this repository" button gives it in APA and BibTeX:
+
+> Uthamkumar M, Dutta A, Basak T. Polariseq: atlas-scale single-cell analysis on the computer you have.
+> Version 0.2.0 (2026). https://github.com/DarkOxygen123/Polariseq
+
 ## License
 
-Polariseq is free software, released under the GNU General Public License,
-version 3 or later ([LICENSE](LICENSE)). Some steps follow the source of
-established tools so that they give the same answers; those tools and their
-licences are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Polariseq is released under the [PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0)
+with additional terms, all in [LICENSE](LICENSE):
+
+- **Free for noncommercial use**: academic research, teaching, and use by universities, research
+  institutes and nonprofit organizations, whatever their funding, as long as the work is not a paid
+  service or product for a company.
+- **Keep the notices**: copies and changed versions carry [LICENSE](LICENSE) and
+  [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), and a changed version says it is based on Polariseq.
+- **Cite it**: work that uses Polariseq cites it (see [Citation](#citation)).
+- **Commercial use requires an agreement with the authors**, including use inside a company and analyses
+  run as a paid service. Contact: trayambak@iitmandi.ac.in.
+
+Some steps follow code published by others under permissive licences; those projects and their licences
+are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 Copyright (C) 2026 Uthamkumar M, Abhi Dutta and Trayambak Basak.

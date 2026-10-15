@@ -86,7 +86,7 @@ def test_tl_paris_stores_reuses_and_cuts():
     labels = np.asarray(a.obs["paris"])
     assert labels.min() == 0 and len(np.unique(labels)) >= 6
     # Well-separated groups: the 6-cluster cut recovers them.
-    from sklearn.metrics import adjusted_rand_score
+    adjusted_rand_score = pytest.importorskip("sklearn.metrics").adjusted_rand_score
 
     truth = np.argmin(((x[:, None, :] - centres[None]) ** 2).sum(-1), axis=1)
     assert adjusted_rand_score(truth, labels) > 0.95

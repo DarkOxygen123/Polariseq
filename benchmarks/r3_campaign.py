@@ -112,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--allow-dirty", action="store_true")
     ap.add_argument("--allow-battery", action="store_true")
     ap.add_argument("--umap", action="store_true",
-                    help="revision 4: with UMAP, other tools only, into telemetry_r4_umap")
+                    help="with UMAP, the other tools only, into telemetry_r4_umap")
     ap.add_argument("--gate-pressured-fraction", type=float, default=None,
                     help="passed to run_telemetry (see its help)")
     a = ap.parse_args(argv)

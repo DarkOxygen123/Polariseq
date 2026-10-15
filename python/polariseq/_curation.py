@@ -128,6 +128,37 @@ def merge_clusters(adata: Any, groups: list, groupby: str = "leiden", *, key_add
                     "groups": groups, "names": list(names) if names is not None else None})
 
 
+def _csr_block(graph: Any, idx: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The rows and columns ``idx`` (sorted) of a CSR graph, as CSR arrays with each row's columns sorted.
+
+    Reads only ``indptr``, ``indices`` and ``data``, so the graph may be a SciPy matrix or the arrays
+    ``pp.neighbors`` stores when SciPy is not installed.
+    """
+    if not hasattr(graph, "indptr"):
+        if hasattr(graph, "tocsr"):
+            graph = graph.tocsr()
+        else:
+            raise TypeError("obsp['connectivities'] is not a CSR graph; run ps.pp.neighbors again")
+    indptr = np.asarray(graph.indptr, dtype=np.int64)
+    indices = np.asarray(graph.indices, dtype=np.int64)
+    data = np.asarray(graph.data)
+    starts = indptr[idx]
+    lens = indptr[idx + 1] - starts
+    total = int(lens.sum())
+    # positions of every entry of the selected rows, row after row
+    offsets = np.repeat(starts - np.concatenate(([0], np.cumsum(lens)[:-1])), lens)
+    take = offsets + np.arange(total, dtype=np.int64)
+    rows = np.repeat(np.arange(idx.size, dtype=np.int64), lens)
+    new_col = np.full(indptr.size - 1, -1, dtype=np.int64)
+    new_col[idx] = np.arange(idx.size, dtype=np.int64)
+    cols = new_col[indices[take]]
+    keep = cols >= 0
+    rows, cols, vals = rows[keep], cols[keep], data[take][keep]
+    order = np.lexsort((cols, rows))
+    sub_indptr = np.concatenate(([0], np.cumsum(np.bincount(rows, minlength=idx.size)))).astype(np.int64)
+    return sub_indptr, cols[order], vals[order]
+
+
 def subcluster(adata: Any, cluster: Any, groupby: str = "leiden", *, resolution: float = 1.0,
                seed: int = 0, key_added: str | None = None) -> int:
     """Split one cluster: Leiden on the neighbour graph between that cluster's cells only.
@@ -144,8 +175,6 @@ def subcluster(adata: Any, cluster: Any, groupby: str = "leiden", *, resolution:
         seed: Random seed.
         key_added: The column written (default ``f"{groupby}_curated"``; ``groupby`` to replace it).
     """
-    from scipy import sparse
-
     from polariseq._polariseq import leiden_cluster
 
     if "connectivities" not in adata.obsp:
@@ -158,13 +187,9 @@ def subcluster(adata: Any, cluster: Any, groupby: str = "leiden", *, resolution:
     idx = np.flatnonzero(codes == t)
     if idx.size < 3:
         raise ValueError(f"cluster {target!r} has {idx.size} cells; too few to split")
-    conn = adata.obsp["connectivities"]
-    if not sparse.isspmatrix_csr(conn) and not isinstance(conn, sparse.csr_array):
-        conn = sparse.csr_matrix(conn)
-    sub = conn[idx][:, idx].tocsr()
-    sub.sort_indices()
-    res = leiden_cluster(np.asarray(sub.indptr, dtype=np.uint32), np.asarray(sub.indices, dtype=np.uint32),
-                         np.asarray(sub.data, dtype=np.float32), int(idx.size), float(resolution), int(seed))
+    sub_indptr, sub_indices, sub_data = _csr_block(adata.obsp["connectivities"], idx)
+    res = leiden_cluster(sub_indptr.astype(np.uint32), sub_indices.astype(np.uint32),
+                         sub_data.astype(np.float32), int(idx.size), float(resolution), int(seed))
     part = np.asarray(res["labels"], dtype=np.int64)
     sizes = np.bincount(part)
     order = np.argsort(-sizes, kind="stable")  # parts named by decreasing size

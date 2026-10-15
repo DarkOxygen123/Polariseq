@@ -8,8 +8,8 @@
 # env.versions by telemetry/record.py.
 #
 # The polariseq package itself is installed into the same environment with
-#   pip install polariseq
-# or, from a source checkout, maturin develop --release.
+#   pip install .
+# from this checkout (INSTALL.md), or maturin develop --release.
 
 scanpy==1.12.3
 anndata==0.13.2

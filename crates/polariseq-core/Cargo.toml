@@ -15,6 +15,7 @@ rand = { workspace = true }
 rand_chacha = { workspace = true }
 memmap2 = { workspace = true }
 thiserror = "1.0"
+libm = "0.2"
 
 [dev-dependencies]
 criterion = { workspace = true }

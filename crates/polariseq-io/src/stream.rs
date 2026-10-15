@@ -9,8 +9,8 @@
 //!
 //! ## Why reads are serialised
 //!
-//! The vendored HDF5 is **not thread-safe** (handbook chapter 00, pitfall
-//! 13). Blocks are therefore read one at a time on the calling thread; the
+//! The vendored HDF5 is **not thread-safe**: calls from two threads at once
+//! can corrupt its state. Blocks are therefore read one at a time on the calling thread; the
 //! *work* is what runs in parallel. Each pass reads a batch of up to
 //! [`PREFETCH`] blocks sequentially, then hands the batch to rayon and
 //! calls `f` on each block concurrently. Peak memory is bounded by

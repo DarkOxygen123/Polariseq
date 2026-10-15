@@ -11,29 +11,27 @@
 //! (a replicate, condition and cell type), in any row-block source (the
 //! in-memory matrix, the on-disk store).
 //!
-//! [`limma_trend`] tests one cell type's sums as edgeR and limma do in their
-//! recommended pseudobulk workflow (`filterByExpr(y, group = condition)`,
-//! `y[keep, , keep.lib.sizes = FALSE]`, TMM `normLibSizes`,
-//! `cpm(y, log = TRUE, prior.count = 3)`, `lmFit`, `eBayes(trend = TRUE)`,
-//! BH-adjusted p-values), re-implemented from edgeR 4.10 and limma 3.68 and
-//! checked against them. Replicates measured under several conditions (the
-//! same donor before and after treatment) are paired: the design blocks on
-//! them, `~ replicate + condition`; otherwise it is `~ condition`.
+//! [`limma_trend`] tests one cell type's sums by the recommended pseudobulk
+//! workflow of edgeR and limma: the expression filter (Chen, Lun & Smyth
+//! 2016), library sizes of the genes kept, TMM normalization (Robinson &
+//! Oshlack 2010), log2 counts per million with a prior count of 3 scaled to
+//! the library size, a linear model per gene, empirical Bayes moderation of
+//! the variances with an intensity trend (Smyth 2004; Phipson et al. 2016;
+//! limma-trend, Law et al. 2014), and Benjamini-Hochberg adjusted p-values.
+//! Replicates measured under several conditions (the same donor before and
+//! after treatment) are paired: the design blocks on them,
+//! `~ replicate + condition`; otherwise it is `~ condition`.
 //!
-//! Licences of the code this module follows. `filter_by_expr`, `tmm_factor`
-//! and `tmm_factors` follow edgeR's `filterByExpr`, `.calcFactorTMM` and
-//! `normLibSizes` (edgeR, GPL (>= 2), Copyright Gordon Smyth, Yunshun Chen,
-//! Aaron Lun, Davis McCarthy, Mark Robinson and contributors); `fit_f_dist`,
-//! `trigamma_inverse` and the empirical Bayes steps of `limma_trend` follow
-//! limma's `fitFDist`, `trigammaInverse`, `squeezeVar` and `eBayes` (limma,
-//! GPL (>= 2), Copyright Gordon Smyth and contributors); `logmdigamma`
-//! follows statmod's `logmdigamma` (statmod, GPL-2 | GPL-3, Copyright Gordon
-//! Smyth and contributors). Polariseq is therefore to be distributed under a
-//! licence compatible with the GPL, version 3.
+//! The methods are implemented from those papers and from the edgeR and
+//! limma documentation. Where the documentation leaves a detail open (the
+//! trimming ranks of TMM, the knots of the trend, the treatment of zero
+//! variances, the order of operations at the filter's cutoff), it was fixed
+//! by comparing outputs with edgeR 4.10.5 and limma 3.68.5 on generated data
+//! (`benchmarks/relicence/pseudobulk_reference.R` on the reproduce branch): on 350 datasets the genes
+//! kept are the same and the p-values agree to 4e-12.
 
 // Formula-style names (n, g, p, x, y, v, z) follow the references; exact
-// float comparisons (ties, zeros) are the references'; authors' names
-// (McCarthy) appear in prose.
+// float comparisons (ties, zeros) are deliberate.
 #![allow(
     clippy::doc_markdown,
     clippy::many_single_char_names,
@@ -159,251 +157,203 @@ pub fn unit_sums_blocks(src: &dyn RowBlocks, unit: &[u32], n_units: usize) -> Un
 }
 
 // ── special functions ─────────────────────────────────────────────────────
+//
+// From the NIST Digital Library of Mathematical Functions (DLMF,
+// https://dlmf.nist.gov): the polygamma functions by their recurrences up to
+// `SERIES_FROM`, then their asymptotic series in Bernoulli numbers; the
+// regularized incomplete beta function by its continued fraction (DLMF
+// 8.17.22), evaluated with the modified Lentz method (Thompson & Barnett
+// 1986). `lgamma` and `erfc` are libm's (MIT or Apache-2.0, a port of musl).
 
-/// `log(x) - digamma(x)`, as statmod's `logmdigamma` computes it (limma's
-/// `fitFDist` uses it).
-fn logmdigamma(x: f64) -> f64 {
+/// `B_2, B_4, …, B_16` (DLMF 24.2.1).
+const BERNOULLI: [f64; 8] = [
+    1.0 / 6.0,
+    -1.0 / 30.0,
+    1.0 / 42.0,
+    -1.0 / 30.0,
+    5.0 / 66.0,
+    -691.0 / 2730.0,
+    7.0 / 6.0,
+    -3617.0 / 510.0,
+];
+
+/// Arguments from which the asymptotic series are used: their first omitted
+/// term is below 1e-19 relative there.
+const SERIES_FROM: f64 = 12.0;
+
+/// `log(x) − ψ(x)` for `x > 0`, without the cancellation of computing the two
+/// apart: `ψ(x) = ψ(x + n) − Σ_{j<n} 1/(x + j)` (DLMF 5.5.2) and
+/// `ln z − ψ(z) ~ 1/(2z) + Σ_k B_2k / (2k z^2k)` (DLMF 5.11.2).
+fn log_minus_digamma(x: f64) -> f64 {
     if x.is_nan() || x <= 0.0 {
         return f64::NAN;
     }
-    if x < 5.0 {
-        return (x / (x + 5.0)).ln()
-            + logmdigamma(x + 5.0)
-            + 1.0 / x
-            + 1.0 / (x + 1.0)
-            + 1.0 / (x + 2.0)
-            + 1.0 / (x + 3.0)
-            + 1.0 / (x + 4.0);
+    let mut z = x;
+    let mut shift = 0.0;
+    while z < SERIES_FROM {
+        shift += 1.0 / z;
+        z += 1.0;
     }
-    let y = 1.0 / (x * x);
-    let tail = y
-        * (-1.0 / 12.0
-            + y * (1.0 / 120.0
-                + y * (-1.0 / 252.0
-                    + y * (1.0 / 240.0
-                        + y * (-1.0 / 132.0
-                            + y * (691.0 / 32_760.0 + y * (-1.0 / 12.0 + 3617.0 * y / 8160.0)))))));
-    1.0 / (2.0 * x) - tail
+    let w = 1.0 / (z * z);
+    let mut series = 0.0;
+    let mut wk = w;
+    for (k, b) in BERNOULLI.iter().enumerate() {
+        series += b / (2.0 * (k + 1) as f64) * wk;
+        wk *= w;
+    }
+    1.0 / (2.0 * z) + series + (x / z).ln() + shift
 }
 
-/// The trigamma function, `ψ'(x)`, for `x > 0`.
-fn trigamma(mut x: f64) -> f64 {
-    let mut acc = 0.0;
-    while x < 10.0 {
-        acc += 1.0 / (x * x);
-        x += 1.0;
+/// The trigamma function `ψ'(x)`, `x > 0`: `ψ'(x) = ψ'(x + 1) + 1/x²` and
+/// `ψ'(z) ~ 1/z + 1/(2z²) + Σ_k B_2k / z^(2k+1)` (DLMF 5.15.8).
+fn trigamma(x: f64) -> f64 {
+    let mut z = x;
+    let mut shift = 0.0;
+    while z < SERIES_FROM {
+        shift += 1.0 / (z * z);
+        z += 1.0;
     }
-    let y = 1.0 / (x * x);
-    acc + 1.0 / x
-        + y / 2.0
-        + (1.0 / x)
-            * y
-            * (1.0 / 6.0
-                + y * (-1.0 / 30.0
-                    + y * (1.0 / 42.0
-                        + y * (-1.0 / 30.0
-                            + y * (5.0 / 66.0 + y * (-691.0 / 2730.0 + y * 7.0 / 6.0))))))
+    let w = 1.0 / (z * z);
+    let mut series = 0.0;
+    let mut zk = w / z;
+    for b in BERNOULLI {
+        series += b * zk;
+        zk *= w;
+    }
+    shift + 1.0 / z + 0.5 * w + series
 }
 
-/// The tetragamma function, `ψ''(x)`, for `x > 0`.
-fn tetragamma(mut x: f64) -> f64 {
-    let mut acc = 0.0;
-    while x < 10.0 {
-        acc -= 2.0 / (x * x * x);
-        x += 1.0;
+/// The tetragamma function `ψ''(x)`, `x > 0`: the derivative of the above,
+/// `ψ''(x) = ψ''(x + 1) − 2/x³`.
+fn tetragamma(x: f64) -> f64 {
+    let mut z = x;
+    let mut shift = 0.0;
+    while z < SERIES_FROM {
+        shift -= 2.0 / (z * z * z);
+        z += 1.0;
     }
-    let y = 1.0 / (x * x);
-    acc - 1.0 / (x * x)
-        - 1.0 / (x * x * x)
-        - (y * y)
-            * (1.0 / 2.0
-                + y * (-1.0 / 6.0
-                    + y * (1.0 / 6.0
-                        + y * (-3.0 / 10.0
-                            + y * (5.0 / 6.0 + y * (-691.0 / 210.0 + y * 35.0 / 2.0))))))
+    let w = 1.0 / (z * z);
+    let mut series = 0.0;
+    let mut zk = w * w;
+    for (k, b) in BERNOULLI.iter().enumerate() {
+        series -= (2.0 * (k + 1) as f64 + 1.0) * b * zk;
+        zk *= w;
+    }
+    shift - w - w / z + series
 }
 
-/// limma's `trigammaInverse`: `y` with `trigamma(y) = x`, by Newton's method.
+/// The `y > 0` with `ψ'(y) = x`: Newton's method on `u = ln y` for
+/// `ln ψ'(e^u) = ln x` (`ψ'` falls monotonically from ∞ to 0), started from
+/// its asymptotes `ψ'(y) ≈ 1/y + 1/(2y²)` (large `y`) and `≈ 1/y²` (small).
 fn trigamma_inverse(x: f64) -> f64 {
-    if x.is_nan() || x < 0.0 {
+    if x.is_nan() || x <= 0.0 {
         return f64::NAN;
     }
-    if x > 1e7 {
-        return 1.0 / x.sqrt();
-    }
-    if x < 1e-6 {
-        return 1.0 / x;
-    }
-    let mut y = 0.5 + 1.0 / x;
-    for _ in 0..=50 {
-        let tri = trigamma(y);
-        let dif = tri * (1.0 - tri / x) / tetragamma(y);
-        y += dif;
-        if -dif / y < 1e-8 {
+    let target = x.ln();
+    let mut u = if x < 1.0 {
+        (1.0 / x + 0.5).ln()
+    } else {
+        -0.5 * target
+    };
+    for _ in 0..100 {
+        let y = u.exp();
+        let (t1, t2) = (trigamma(y), tetragamma(y));
+        let step = (t1.ln() - target) / (y * t2 / t1);
+        u -= step;
+        if step.abs() < 1e-15 {
             break;
         }
     }
-    y
+    u.exp()
 }
 
-/// `ln Γ(x)`, `x > 0` (Lanczos, g = 7).
-fn ln_gamma(x: f64) -> f64 {
-    const C: [f64; 9] = [
-        0.999_999_999_999_809_9,
-        676.520_368_121_885_1,
-        -1_259.139_216_722_402_8,
-        771.323_428_777_653_1,
-        -176.615_029_162_140_6,
-        12.507_343_278_686_905,
-        -0.138_571_095_265_720_12,
-        9.984_369_578_019_572e-6,
-        1.505_632_735_149_311_6e-7,
-    ];
-    if x < 0.5 {
-        let pi = std::f64::consts::PI;
-        return (pi / (pi * x).sin()).ln() - ln_gamma(1.0 - x);
+/// The Stirling remainder `ln Γ(x) − [(x − ½) ln x − x + ½ ln 2π]` for
+/// `x ≥ SERIES_FROM` (DLMF 5.11.1).
+fn stirling_remainder(x: f64) -> f64 {
+    let w = 1.0 / (x * x);
+    let mut s = 0.0;
+    let mut xk = 1.0 / x;
+    for (k, b) in BERNOULLI.iter().enumerate() {
+        let k2 = 2.0 * (k + 1) as f64;
+        s += b / (k2 * (k2 - 1.0)) * xk;
+        xk *= w;
     }
-    let x = x - 1.0;
-    let mut a = C[0];
-    let t = x + 7.5;
-    for (i, &c) in C.iter().enumerate().skip(1) {
-        a += c / (x + i as f64);
-    }
-    0.5 * (2.0 * std::f64::consts::PI).ln() + (x + 0.5) * t.ln() - t + a.ln()
+    s
 }
 
-/// Continued fraction of the incomplete beta function (modified Lentz).
-fn beta_cf(a: f64, b: f64, x: f64) -> f64 {
-    let tiny = 1e-300;
-    let (qab, qap, qam) = (a + b, a + 1.0, a - 1.0);
-    let mut c = 1.0;
-    let mut d = 1.0 - qab * x / qap;
-    if d.abs() < tiny {
-        d = tiny;
+/// `ln B(a, b)`. When the larger argument is large, `ln Γ(a) − ln Γ(a + b)`
+/// is formed from Stirling's series with `ln(a/(a + b))` as a `ln_1p`, so it
+/// keeps its relative accuracy where the difference of two `lgamma`s would
+/// cancel (degrees of freedom in the thousands and more).
+fn ln_beta(a: f64, b: f64) -> f64 {
+    let (big, small) = if a >= b { (a, b) } else { (b, a) };
+    if big < SERIES_FROM {
+        return libm::lgamma(a) + libm::lgamma(b) - libm::lgamma(a + b);
     }
-    d = 1.0 / d;
-    let mut h = d;
-    for m in 1..=10_000 {
-        let m = f64::from(m);
-        let m2 = 2.0 * m;
-        let aa = m * (b - m) * x / ((qam + m2) * (a + m2));
-        d = 1.0 + aa * d;
-        if d.abs() < tiny {
-            d = tiny;
-        }
-        c = 1.0 + aa / c;
-        if c.abs() < tiny {
-            c = tiny;
-        }
-        d = 1.0 / d;
-        h *= d * c;
-        let aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2));
-        d = 1.0 + aa * d;
-        if d.abs() < tiny {
-            d = tiny;
-        }
-        c = 1.0 + aa / c;
-        if c.abs() < tiny {
-            c = tiny;
-        }
-        d = 1.0 / d;
-        let del = d * c;
-        h *= del;
-        if (del - 1.0).abs() < 1e-16 {
-            break;
-        }
-    }
-    h
+    let s = big + small;
+    let ratio =
+        -(big - 0.5) * (small / big).ln_1p() - small * s.ln() + small + stirling_remainder(big)
+            - stirling_remainder(s);
+    libm::lgamma(small) + ratio
 }
 
-/// The regularized incomplete beta function `I_x(a, b)`.
-fn inc_beta(a: f64, b: f64, x: f64) -> f64 {
+/// The regularized incomplete beta function `I_x(a, b)`, given `x` and
+/// `y = 1 − x` separately so the caller can form the smaller one without
+/// cancellation. Below the mean, `x < (a + 1)/(a + b + 2)`, the continued
+/// fraction converges quickly; above it, `I_x(a, b) = 1 − I_y(b, a)` (DLMF
+/// 8.17.4).
+fn inc_beta(a: f64, b: f64, x: f64, y: f64) -> f64 {
     if x <= 0.0 {
         return 0.0;
     }
-    if x >= 1.0 {
+    if y <= 0.0 {
         return 1.0;
     }
-    let ln_front = ln_gamma(a + b) - ln_gamma(a) - ln_gamma(b) + a * x.ln() + b * (1.0 - x).ln();
-    if x < (a + 1.0) / (a + b + 2.0) {
-        (ln_front.exp() * beta_cf(a, b, x) / a).clamp(0.0, 1.0)
-    } else {
-        (1.0 - ln_front.exp() * beta_cf(b, a, 1.0 - x) / b).clamp(0.0, 1.0)
+    if x > (a + 1.0) / (a + b + 2.0) {
+        return 1.0 - inc_beta(b, a, y, x);
     }
+    let ln_x = if x > 0.5 { (-y).ln_1p() } else { x.ln() };
+    let ln_y = if y > 0.5 { (-x).ln_1p() } else { y.ln() };
+    let front = (a * ln_x + b * ln_y - ln_beta(a, b)).exp() / a;
+    // 1 / (1 + d1 / (1 + d2 / (1 + …))), d_2m+1 and d_2m of DLMF 8.17.22.
+    let tiny = 1e-300;
+    let (mut f, mut c, mut d) = (1.0_f64, 1.0_f64, 0.0_f64);
+    for j in 1..=20_000_u32 {
+        let m = f64::from(j / 2);
+        let dj = if j % 2 == 1 {
+            -(a + m) * (a + b + m) * x / ((a + 2.0 * m) * (a + 2.0 * m + 1.0))
+        } else {
+            m * (b - m) * x / ((a + 2.0 * m - 1.0) * (a + 2.0 * m))
+        };
+        d = 1.0 + dj * d;
+        if d.abs() < tiny {
+            d = tiny;
+        }
+        c = 1.0 + dj / c;
+        if c.abs() < tiny {
+            c = tiny;
+        }
+        d = 1.0 / d;
+        let delta = c * d;
+        f *= delta;
+        if (delta - 1.0).abs() < 1e-16 {
+            break;
+        }
+    }
+    (front / f).clamp(0.0, 1.0)
 }
 
-/// Two-sided p-value of Student's `t` with `df` degrees of freedom (real
-/// `df`; infinite means the normal distribution).
+/// Two-sided p-value of Student's `t` on `df` (real) degrees of freedom:
+/// `I_{df/(df+t²)}(df/2, 1/2)`; the normal distribution when `df` is infinite.
 fn t_two_sided(t: f64, df: f64) -> f64 {
     if t.is_nan() || df.is_nan() {
         return f64::NAN;
     }
-    if df.is_infinite() || df > 1e7 {
-        return 2.0 * normal_sf(t.abs());
+    if df.is_infinite() {
+        return libm::erfc(t.abs() / std::f64::consts::SQRT_2);
     }
-    inc_beta(df / 2.0, 0.5, df / (df + t * t))
-}
-
-/// Upper tail of the standard normal, accurate far into the tail.
-fn normal_sf(x: f64) -> f64 {
-    0.5 * erfc(x / std::f64::consts::SQRT_2)
-}
-
-/// Complementary error function (Numerical Recipes' Chebyshev fit, relative
-/// error below 1.2e-7 would not do; this is W. J. Cody's rational form).
-fn erfc(x: f64) -> f64 {
-    // erfc through the incomplete gamma: erfc(x) = Q(1/2, x²) for x ≥ 0.
-    if x < 0.0 {
-        return 2.0 - erfc(-x);
-    }
-    upper_gamma_q(0.5, x * x)
-}
-
-/// The regularized upper incomplete gamma function `Q(a, x)`.
-fn upper_gamma_q(a: f64, x: f64) -> f64 {
-    if x <= 0.0 {
-        return 1.0;
-    }
-    let ln_front = -x + a * x.ln() - ln_gamma(a);
-    if x < a + 1.0 {
-        // Series for P, then Q = 1 - P.
-        let (mut sum, mut del, mut ap) = (1.0 / a, 1.0 / a, a);
-        for _ in 0..100_000 {
-            ap += 1.0;
-            del *= x / ap;
-            sum += del;
-            if del.abs() < sum.abs() * 1e-17 {
-                break;
-            }
-        }
-        (1.0 - sum * ln_front.exp()).max(0.0)
-    } else {
-        // Continued fraction for Q (Lentz).
-        let tiny = 1e-300;
-        let mut b = x + 1.0 - a;
-        let mut c = 1.0 / tiny;
-        let mut d = 1.0 / b;
-        let mut h = d;
-        for i in 1..100_000 {
-            let an = -f64::from(i) * (f64::from(i) - a);
-            b += 2.0;
-            d = an * d + b;
-            if d.abs() < tiny {
-                d = tiny;
-            }
-            c = b + an / c;
-            if c.abs() < tiny {
-                c = tiny;
-            }
-            d = 1.0 / d;
-            let del = d * c;
-            h *= del;
-            if (del - 1.0).abs() < 1e-16 {
-                break;
-            }
-        }
-        ln_front.exp() * h
-    }
+    let t2 = t * t;
+    inc_beta(df / 2.0, 0.5, df / (df + t2), t2 / (df + t2))
 }
 
 /// R's `quantile(x, p)` (type 7).
@@ -489,113 +439,114 @@ impl Default for PseudobulkOptions {
     }
 }
 
-/// edgeR's `filterByExpr(y, group = group)`: genes (columns of the
-/// samples × genes `y`) with enough counts to test.
+/// The expression filter (Chen, Lun & Smyth 2016; edgeR's `filterByExpr`,
+/// as its documentation states it): a gene is kept when its count per
+/// million reaches `min_count / median(library size) × 10⁶` in at least `k`
+/// samples, `k` the smallest condition's sample count (above `large_n`
+/// samples, `large_n + (k − large_n) × min_prop`), and its counts total at
+/// least `min_total_count`. CPM is `count × 10⁶ / library size`, the order of
+/// operations that agrees with edgeR where a count sits exactly on the cutoff.
 fn filter_by_expr(
     y: &[f64],
     n: usize,
     g: usize,
     group: &[u32],
-    o: &PseudobulkOptions,
+    opts: &PseudobulkOptions,
 ) -> Vec<bool> {
     let lib: Vec<f64> = (0..n).map(|i| y[i * g..(i + 1) * g].iter().sum()).collect();
+    let cutoff = opts.min_count / median(&lib) * 1e6;
     let mut sizes: BTreeMap<u32, usize> = BTreeMap::new();
     for &c in group {
-        *sizes.entry(c).or_insert(0) += 1;
+        *sizes.entry(c).or_default() += 1;
     }
-    let mut min_size = sizes.values().copied().min().unwrap_or(0) as f64;
-    if min_size > o.large_n {
-        min_size = o.large_n + (min_size - o.large_n) * o.min_prop;
-    }
-    let cutoff = o.min_count / median(&lib) * 1e6;
-    let tol = 1e-14;
+    let smallest = sizes.values().copied().min().unwrap_or(0) as f64;
+    let k = if smallest > opts.large_n {
+        opts.large_n + (smallest - opts.large_n) * opts.min_prop
+    } else {
+        smallest
+    };
     (0..g)
         .map(|j| {
-            let mut above = 0.0;
-            let mut total = 0.0;
-            for i in 0..n {
-                let v = y[i * g + j];
-                total += v;
-                if v / lib[i] * 1e6 >= cutoff {
-                    above += 1.0;
-                }
-            }
-            above >= min_size - tol && total >= o.min_total_count - tol
+            let above = (0..n)
+                .filter(|&i| y[i * g + j] * 1e6 / lib[i] >= cutoff)
+                .count() as f64;
+            let total: f64 = (0..n).map(|i| y[i * g + j]).sum();
+            above >= k - 1e-14 && total >= opts.min_total_count - 1e-14
         })
         .collect()
 }
 
-/// edgeR's TMM `.calcFactorTMM(obs, ref, ...)` with its defaults.
-fn tmm_factor(obs: &[f64], refc: &[f64], n_o: f64, n_r: f64) -> f64 {
-    let (log_ratio_trim, sum_trim) = (0.3, 0.05);
-    let mut lr = Vec::new();
-    let mut ae = Vec::new();
-    let mut v = Vec::new();
+/// TMM factor of one sample against the reference (Robinson & Oshlack 2010):
+/// over genes counted in both, the log ratios `M = log2((o/N_o)/(r/N_r))` and
+/// mean log expressions `A = (log2(o/N_o) + log2(r/N_r))/2`; the genes whose
+/// rank (ties averaged) is within the middle of both, 30 % trimmed from each
+/// end of M and 5 % of A (ranks `⌊0.3 G⌋ + 1 … G − ⌊0.3 G⌋`); their M
+/// averaged with the inverse of the delta-method variance
+/// `(N_o − o)/(N_o o) + (N_r − r)/(N_r r)` as weights; the factor is 2 to that.
+fn tmm_pair(obs: &[f64], refc: &[f64], n_o: f64, n_r: f64) -> f64 {
+    let (mut m, mut a, mut v) = (Vec::new(), Vec::new(), Vec::new());
     for (&o, &r) in obs.iter().zip(refc) {
-        let l = ((o / n_o) / (r / n_r)).log2();
-        let a = ((o / n_o).log2() + (r / n_r).log2()) / 2.0;
-        if l.is_finite() && a.is_finite() && a > -1e10 {
-            lr.push(l);
-            ae.push(a);
-            v.push((n_o - o) / n_o / o + (n_r - r) / n_r / r);
+        if o > 0.0 && r > 0.0 {
+            let (po, pr) = (o / n_o, r / n_r);
+            let mi = (po / pr).log2();
+            let ai = 0.5 * (po.log2() + pr.log2());
+            if mi.is_finite() && ai.is_finite() {
+                m.push(mi);
+                a.push(ai);
+                v.push((n_o - o) / n_o / o + (n_r - r) / n_r / r);
+            }
         }
     }
-    if lr.iter().fold(0.0_f64, |m, x| m.max(x.abs())) < 1e-6 {
+    let count = m.len();
+    if count == 0 {
         return 1.0;
     }
-    let n = lr.len() as f64;
-    let lo_l = (n * log_ratio_trim).floor() + 1.0;
-    let hi_l = n + 1.0 - lo_l;
-    let lo_s = (n * sum_trim).floor() + 1.0;
-    let hi_s = n + 1.0 - lo_s;
-    let (rl, ra) = (rank_average(&lr), rank_average(&ae));
+    let bounds = |trim: f64| {
+        let lo = (count as f64 * trim).floor() + 1.0;
+        (lo, count as f64 + 1.0 - lo)
+    };
+    let ((lo_m, hi_m), (lo_a, hi_a)) = (bounds(0.3), bounds(0.05));
+    let (rm, ra) = (rank_average(&m), rank_average(&a));
     let (mut num, mut den) = (0.0, 0.0);
-    for k in 0..lr.len() {
-        if rl[k] >= lo_l && rl[k] <= hi_l && ra[k] >= lo_s && ra[k] <= hi_s {
-            num += lr[k] / v[k];
-            den += 1.0 / v[k];
+    for i in 0..count {
+        if rm[i] >= lo_m && rm[i] <= hi_m && ra[i] >= lo_a && ra[i] <= hi_a {
+            num += m[i] / v[i];
+            den += 1.0 / v[i];
         }
     }
-    let f = num / den;
-    if f.is_nan() {
-        1.0
+    if den > 0.0 {
+        (num / den).exp2()
     } else {
-        f.exp2()
+        1.0
     }
 }
 
-/// edgeR's TMM normalization factors (`normLibSizes`) of the samples ×
-/// genes `y` with library sizes `lib`.
+/// TMM normalization factors (edgeR's documented defaults): genes counted in
+/// no sample left out; the reference is the sample whose upper quartile of
+/// count proportions is closest to the mean of those quartiles; the factors
+/// scaled to a geometric mean of 1.
 fn tmm_factors(y: &[f64], n: usize, g: usize, lib: &[f64]) -> Vec<f64> {
-    let genes: Vec<usize> = (0..g)
+    let used: Vec<usize> = (0..g)
         .filter(|&j| (0..n).any(|i| y[i * g + j] > 0.0))
         .collect();
-    if genes.is_empty() || n == 1 {
-        return vec![1.0; n];
+    let rows: Vec<Vec<f64>> = (0..n)
+        .map(|i| used.iter().map(|&j| y[i * g + j]).collect())
+        .collect();
+    let upper: Vec<f64> = (0..n)
+        .map(|i| {
+            let p: Vec<f64> = rows[i].iter().map(|c| c / lib[i]).collect();
+            quantile7(&p, 0.75)
+        })
+        .collect();
+    let mean_upper = upper.iter().sum::<f64>() / n as f64;
+    let mut reference = 0;
+    for i in 1..n {
+        if (upper[i] - mean_upper).abs() < (upper[reference] - mean_upper).abs() {
+            reference = i;
+        }
     }
-    let col = |i: usize| -> Vec<f64> { genes.iter().map(|&j| y[i * g + j]).collect() };
-    let f75: Vec<f64> = (0..n).map(|i| quantile7(&col(i), 0.75) / lib[i]).collect();
-    let refi = if median(&f75) < 1e-20 {
-        (0..n)
-            .max_by(|&a, &b| {
-                let s = |i: usize| col(i).iter().map(|x| x.sqrt()).sum::<f64>();
-                s(a).total_cmp(&s(b)).then(b.cmp(&a))
-            })
-            .unwrap_or(0)
-    } else {
-        let mean = f75.iter().sum::<f64>() / n as f64;
-        (0..n)
-            .min_by(|&a, &b| {
-                (f75[a] - mean)
-                    .abs()
-                    .total_cmp(&(f75[b] - mean).abs())
-                    .then(a.cmp(&b))
-            })
-            .unwrap_or(0)
-    };
-    let rcol = col(refi);
     let f: Vec<f64> = (0..n)
-        .map(|i| tmm_factor(&col(i), &rcol, lib[i], lib[refi]))
+        .map(|i| tmm_pair(&rows[i], &rows[reference], lib[i], lib[reference]))
         .collect();
     let geo = (f.iter().map(|x| x.ln()).sum::<f64>() / n as f64).exp();
     f.iter().map(|x| x / geo).collect()
@@ -603,33 +554,31 @@ fn tmm_factors(y: &[f64], n: usize, g: usize, lib: &[f64]) -> Vec<f64> {
 
 // ── limma ─────────────────────────────────────────────────────────────────
 
-/// A natural cubic spline basis with R's `ns(x, df, intercept = TRUE)`
-/// knots (boundary at the range, interior at quantiles). Any basis of that
-/// space gives `lm.fit` the same fitted values and residuals.
-fn natural_spline_basis(x: &[f64], df: usize) -> Vec<Vec<f64>> {
+/// A natural cubic spline basis (intercept, linear term, and one column per
+/// interior knot) in the truncated-power form of Hastie, Tibshirani &
+/// Friedman (2009), eq. 5.4-5.5: boundary knots at the range of `x`,
+/// `inner` interior knots at its quantiles `k/(inner + 1)` (type 7). `x` is
+/// mapped to [0, 1] first, which leaves the space unchanged and keeps the
+/// normal equations well conditioned.
+fn natural_spline_basis(x: &[f64], inner: usize) -> Vec<Vec<f64>> {
     let lo = x.iter().copied().fold(f64::INFINITY, f64::min);
     let hi = x.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    let scale = if hi > lo { hi - lo } else { 1.0 };
-    let s: Vec<f64> = x.iter().map(|v| (v - lo) / scale).collect();
-    let n_inner = df.saturating_sub(2);
+    let span = if hi > lo { hi - lo } else { 1.0 };
+    let s: Vec<f64> = x.iter().map(|v| (v - lo) / span).collect();
     let mut knots = vec![0.0];
-    for k in 1..=n_inner {
-        knots.push((quantile7(x, k as f64 / (n_inner + 1) as f64) - lo) / scale);
+    for k in 1..=inner {
+        knots.push((quantile7(x, k as f64 / (inner + 1) as f64) - lo) / span);
     }
     knots.push(1.0);
-    let kk = knots.len();
-    let d = |k: usize, v: f64| -> f64 {
-        let c = |t: f64| (v - t).max(0.0).powi(3);
-        (c(knots[k]) - c(knots[kk - 1])) / (knots[kk - 1] - knots[k])
+    let last = knots.len() - 1;
+    let d = |k: usize, v: f64| {
+        let cube = |t: f64| (v - t).max(0.0).powi(3);
+        (cube(knots[k]) - cube(knots[last])) / (knots[last] - knots[k])
     };
-    let mut basis = vec![vec![1.0; x.len()]];
-    if df >= 2 {
-        basis.push(s.clone());
+    let mut basis = vec![vec![1.0; x.len()], s.clone()];
+    for k in 0..last.saturating_sub(1) {
+        basis.push(s.iter().map(|&v| d(k, v) - d(last - 1, v)).collect());
     }
-    for k in 0..kk.saturating_sub(2) {
-        basis.push(s.iter().map(|&v| d(k, v) - d(kk - 2, v)).collect());
-    }
-    basis.truncate(df.max(1));
     basis
 }
 
@@ -703,57 +652,48 @@ fn chol_inverse_diag(l: &[f64], p: usize) -> Vec<f64> {
         .collect()
 }
 
-/// limma's `fitFDist(x, df1, covariate)` for one common `df1`: the prior's
-/// scale for each gene and its degrees of freedom.
-fn fit_f_dist(x: &[f64], df1: f64, covariate: &[f64]) -> (Vec<f64>, f64) {
-    let n = x.len();
-    let ok: Vec<bool> = x.iter().map(|&v| v.is_finite() && v > -1e-15).collect();
-    let idx: Vec<usize> = (0..n).filter(|&i| ok[i]).collect();
-    let nok = idx.len();
-    if nok == 1 {
-        return (vec![x[idx[0]]; n], 0.0);
-    }
-    let cov_ok: Vec<f64> = idx.iter().map(|&i| covariate[i]).collect();
-    let mut uniq = cov_ok.clone();
-    uniq.sort_by(f64::total_cmp);
-    uniq.dedup();
-    let mut splinedf = 1 + usize::from(nok >= 3) + usize::from(nok >= 6) + usize::from(nok >= 30);
-    splinedf = splinedf.min(uniq.len());
-    let xs: Vec<f64> = idx.iter().map(|&i| x[i].max(0.0)).collect();
-    let mut m = median(&xs);
-    if m == 0.0 {
-        m = 1.0;
-    }
-    let xs: Vec<f64> = xs.iter().map(|&v| v.max(1e-5 * m)).collect();
-    let lmd = logmdigamma(df1 / 2.0);
-    let e: Vec<f64> = xs.iter().map(|v| v.ln() + lmd).collect();
-    let (emean_ok, evar): (Vec<f64>, f64) = if splinedf < 2 {
-        let mean = e.iter().sum::<f64>() / nok as f64;
-        let var = e.iter().map(|v| (v - mean) * (v - mean)).sum::<f64>() / (nok as f64 - 1.0);
-        (vec![mean; nok], var)
+/// The prior of the residual variances (Smyth 2004, section 6.2, with the
+/// trend of Phipson et al. 2016): `s²` given `d` residual degrees of freedom
+/// is the prior variance `s0²` times an F on `d` and `d0` degrees of freedom.
+/// By the method of moments on `e = ln s² + ln(d/2) − ψ(d/2)`: a natural
+/// spline in mean expression gives the trend of `E e` (interior knots: none
+/// below 6 genes, one below 30, else two), the residual variance of `e` less
+/// `ψ'(d/2)` is `ψ'(d0/2)`, and `s0² = exp(E e − ln(d0/2) + ψ(d0/2))`. When
+/// that variance is not positive there is no extra variation: `d0 = ∞` and
+/// `s0² = exp(E e)`. Variances below 10⁻⁵ of their median are raised to it
+/// first, so that a gene of zero variance cannot dominate.
+/// Returns `(s0²` per gene`, d0)`.
+fn fit_prior(s2: &[f64], d: f64, covariate: &[f64]) -> (Vec<f64>, f64) {
+    let g = s2.len();
+    let floor = (1e-5 * median(s2)).max(f64::MIN_POSITIVE);
+    let e: Vec<f64> = s2
+        .iter()
+        .map(|&v| v.max(floor).ln() + log_minus_digamma(d / 2.0))
+        .collect();
+    let inner = if g < 6 {
+        0
+    } else if g < 30 {
+        1
     } else {
-        let basis = natural_spline_basis(&cov_ok, splinedf);
-        let rank = basis.len();
-        let (fitted, rss) = least_squares(&basis, &e).unwrap_or_else(|| {
-            let mean = e.iter().sum::<f64>() / nok as f64;
-            let rss = e.iter().map(|v| (v - mean) * (v - mean)).sum();
-            (vec![mean; nok], rss)
-        });
-        (fitted, rss / (nok - rank) as f64)
+        2
     };
-    // Genes left out of the fit take the trend's value at their covariate;
-    // with every variance finite (the pseudobulk case) there are none.
-    let mut emean = vec![f64::NAN; n];
-    for (k, &i) in idx.iter().enumerate() {
-        emean[i] = emean_ok[k];
-    }
-    let evar = evar - trigamma(df1 / 2.0);
-    if evar > 0.0 {
-        let df2 = 2.0 * trigamma_inverse(evar);
-        let lmd2 = logmdigamma(df2 / 2.0);
-        (emean.iter().map(|&em| (em - lmd2).exp()).collect(), df2)
+    let mean_e = e.iter().sum::<f64>() / g as f64;
+    // A trend the covariate cannot support (all genes at one mean) falls
+    // back to a constant.
+    let (fitted, rss, p) = least_squares(&natural_spline_basis(covariate, inner), &e).map_or_else(
+        || {
+            let rss = e.iter().map(|v| (v - mean_e) * (v - mean_e)).sum();
+            (vec![mean_e; g], rss, 1)
+        },
+        |(f, rss)| (f, rss, inner + 2),
+    );
+    let extra = rss / (g as f64 - p as f64) - trigamma(d / 2.0);
+    if extra > 0.0 {
+        let d0 = 2.0 * trigamma_inverse(extra);
+        let shift = log_minus_digamma(d0 / 2.0);
+        (fitted.iter().map(|f| (f - shift).exp()).collect(), d0)
     } else {
-        (emean.iter().map(|&em| em.exp()).collect(), f64::INFINITY)
+        (fitted.iter().map(|f| f.exp()).collect(), f64::INFINITY)
     }
 }
 
@@ -830,8 +770,8 @@ pub fn limma_trend(
         return Err("no sample of a condition other than the reference".into());
     }
 
-    // filterByExpr on the condition groups, then library sizes of the genes
-    // kept (keep.lib.sizes = FALSE) and TMM.
+    // The expression filter on the condition groups, then library sizes of
+    // the genes kept and TMM.
     let keep = filter_by_expr(y, n, g, condition, opts);
     let genes: Vec<usize> = (0..g).filter(|&j| keep[j]).collect();
     let h = genes.len();
@@ -847,13 +787,14 @@ pub fn limma_trend(
     let nf = tmm_factors(&yk, n, h, &lib);
     let eff: Vec<f64> = lib.iter().zip(&nf).map(|(l, f)| l * f).collect();
     let mean_eff = eff.iter().sum::<f64>() / n as f64;
-    // log2 CPM with the prior count scaled by library size, as edgeR's cpm.
+    // log2 CPM, the prior count scaled to the library size and twice it added
+    // to the library (edgeR's documented `cpm(log = TRUE)`).
     let logcpm: Vec<f64> = (0..n)
         .flat_map(|i| {
             let pc = opts.prior_count * eff[i] / mean_eff;
             let denom = eff[i] + 2.0 * pc;
             let yk = &yk;
-            (0..h).map(move |j| ((yk[i * h + j] + pc) / denom).log2() + 1e6_f64.log2())
+            (0..h).map(move |j| ((yk[i * h + j] + pc) / denom * 1e6).log2())
         })
         .collect();
 
@@ -905,7 +846,7 @@ pub fn limma_trend(
     let unscaled: Vec<f64> = chol_inverse_diag(&l, p).iter().map(|v| v.sqrt()).collect();
     let df = (n - p) as f64;
 
-    // lmFit: coefficients and residual variance per gene.
+    // The linear model: coefficients and residual variance per gene.
     let fits: Vec<(Vec<f64>, f64)> = (0..h)
         .into_par_iter()
         .map(|j| {
@@ -928,8 +869,10 @@ pub fn limma_trend(
         .map(|j| (0..n).map(|i| logcpm[i * h + j]).sum::<f64>() / n as f64)
         .collect();
 
-    // eBayes(trend = TRUE): the prior variance follows mean expression.
-    let (s2_prior, df_prior) = fit_f_dist(&s2, df, &amean);
+    // Empirical Bayes: the prior variance follows mean expression; posterior
+    // variances, and the moderated t on d + d0 degrees of freedom (at most the
+    // pooled residual degrees of freedom), Smyth (2004).
+    let (s2_prior, df_prior) = fit_prior(&s2, df, &amean);
     let s2_post: Vec<f64> = if df_prior.is_finite() {
         s2.iter()
             .zip(&s2_prior)
@@ -1065,19 +1008,42 @@ mod tests {
     use crate::matrix::CsrMatrix;
 
     #[test]
+    #[allow(clippy::excessive_precision)] // R's values, printed to 17 digits
     fn special_functions_match_r() {
-        // R 4.5: trigamma, psigamma(deriv = 2), lgamma, 2 * pt(-|t|, df),
+        // R 4.6.1: trigamma, psigamma(deriv = 2), lbeta, 2 * pt(-|t|, df),
         // log(x) - digamma(x).
         let close =
             |a: f64, b: f64, tol: f64| assert!((a - b).abs() <= tol * b.abs(), "{a} vs {b}");
-        close(trigamma(0.7), 2.834_049_156_694_610_4, 1e-13);
-        close(trigamma(12.3), 0.084_695_170_245_916_38, 1e-13);
-        close(tetragamma(1.3), -1.198_462_514_651_956_5, 1e-12);
-        close(ln_gamma(4.5), 2.453_736_570_842_442_3, 1e-14);
-        close(trigamma(trigamma_inverse(0.37)), 0.37, 1e-10);
-        close(t_two_sided(2.1, 7.5), 0.071_237_071_458_078_05, 1e-12);
-        close(t_two_sided(-40.0, 12.0), 3.851_229_580_772_037e-14, 1e-10);
-        close(logmdigamma(2.2), 0.244_163_923_623_125_33, 1e-14);
+        close(trigamma(0.7), 2.834_049_156_694_610_4, 1e-14);
+        close(trigamma(12.3), 0.084_695_170_245_916_385, 1e-14);
+        close(trigamma(1e-4), 100_000_001.644_693_67, 1e-14);
+        close(tetragamma(1.3), -1.198_462_514_651_956_5, 1e-13);
+        close(tetragamma(40.0), -0.000_640_820_271_835_298_58, 1e-13);
+        close(ln_beta(3.2, 0.5), 0.029_697_443_414_221_078, 1e-13);
+        close(ln_beta(5000.0, 0.5), -3.686_206_652_783_460_5, 1e-14);
+        close(ln_beta(2e6, 0.5), -6.681_963_863_837_409_3, 1e-14);
+        close(t_two_sided(2.1, 7.5), 0.071_237_071_458_078_047, 1e-13);
+        close(t_two_sided(-40.0, 12.0), 3.851_229_580_772_036_9e-14, 1e-12);
+        close(t_two_sided(0.01, 3.0), 0.992_649_111_412_851_95, 1e-14);
+        close(
+            t_two_sided(3.3, 150_000.0),
+            0.000_967_073_595_280_029_2,
+            1e-11,
+        );
+        close(t_two_sided(9.0, 4e6), 2.258_125_307_522_478_7e-19, 1e-10);
+        close(t_two_sided(1.5, 0.7), 0.440_365_097_019_240_15, 1e-13);
+        close(log_minus_digamma(2.2), 0.244_163_923_623_125_33, 1e-14);
+        close(log_minus_digamma(0.03), 30.355_696_523_298_786, 1e-14);
+        close(log_minus_digamma(250.0), 0.002_001_333_331_199_894_9, 1e-13);
+        for x in [1e-9, 1e-3, 0.37, 2.0, 50.0, 1e6] {
+            close(trigamma(trigamma_inverse(x)), x, 1e-13);
+        }
+    }
+
+    #[test]
+    fn tmm_of_a_sample_against_itself_is_one() {
+        let row = [3.0, 0.0, 17.0, 250.0, 9.0, 1.0];
+        assert_eq!(tmm_pair(&row, &row, 280.0, 280.0), 1.0);
     }
 
     #[test]
