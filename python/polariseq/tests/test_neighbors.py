@@ -6,6 +6,8 @@ mixture large enough that the auto-switch in ``pp.neighbors`` picks it.
 
 from __future__ import annotations
 
+import sys
+
 import numpy as np
 import polariseq as ps
 import pytest
@@ -171,7 +173,10 @@ def test_on_a_network_the_inputs_are_copied_to_a_local_disk(proj, monkeypatch, t
     assert run.uns["leiden"]["inputs"] == run.uns["umap"]["inputs"] == "mapped-local-copy"
     np.testing.assert_array_equal(np.asarray(run.obs["leiden"]), np.asarray(ref.obs["leiden"]))
     np.testing.assert_array_equal(np.asarray(run.obsm["X_umap"]), np.asarray(ref.obsm["X_umap"]))
-    assert not list((tmp_path / "tmp").glob("polariseq_inputs_*")), "copies left behind"
+    if sys.platform != "win32":
+        # Windows cannot remove a file while it is memory-mapped, and the arrays of the finished
+        # step are still referenced here; there the copies go with the temporary folder later.
+        assert not list((tmp_path / "tmp").glob("polariseq_inputs_*")), "copies left behind"
 
 
 def test_on_a_network_without_a_local_disk_the_step_warns(proj, monkeypatch, tmp_path) -> None:
