@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 import polariseq as ps
+import pytest
 from polariseq._polariseq import neighbors_dense, nndescent_dense
 
 K = 15
@@ -99,3 +100,88 @@ def test_cosine_is_honoured_on_the_approximate_path() -> None:
                        for i in range(0, 12_000, 97)])
     assert overlap > 0.9, overlap
     assert float(np.max(a.data)) <= 2.0 + 1e-5      # cosine distances, not Euclidean
+
+
+def _graph_steps(name: str | None, emb: np.ndarray):
+    sp = pytest.importorskip("scipy.sparse")
+    from polariseq import _results
+
+    adata = ps.AnnData(X=sp.csr_matrix((emb.shape[0], 1), dtype=np.float32))
+    adata.name = name
+    # in a project, saved as PCA saves it: a view of a result file
+    adata.obsm["X_pca"] = _results.keep(adata, "pca", "X_pca", emb.copy())
+    ps.pp.neighbors(adata, seed=0)
+    ps.tl.leiden(adata, seed=0)
+    ps.tl.umap(adata, seed=0, deterministic=True)
+    return adata
+
+
+def test_graph_steps_give_the_same_from_memory_and_from_mapped_files(proj) -> None:
+    """In a project the embedding and the graphs are views of result files. The
+    graph steps read them into memory when they fit the budget, else in place;
+    either way the results equal those of a run in memory."""
+    from polariseq import _results
+
+    emb = mixture(12_000, seed=5)
+    ref = _graph_steps(None, emb)
+    assert ref.uns["leiden"]["inputs"] == "memory"
+    loaded = _graph_steps("loaded", emb)
+    assert loaded.uns["neighbors"]["inputs"] == {"embedding": "loaded", "distances": "loaded"}
+    assert loaded.uns["leiden"]["inputs"] == loaded.uns["umap"]["inputs"] == "loaded"
+    ps.set_budget(ram_gb=0.01)  # below any step's inputs: read in place
+    mapped = _graph_steps("mapped", emb)
+    assert mapped.uns["neighbors"]["inputs"] == {"embedding": "mapped", "distances": "mapped"}
+    assert mapped.uns["leiden"]["inputs"] == mapped.uns["umap"]["inputs"] == "mapped"
+    for run in (loaded, mapped):
+        assert isinstance(run.obsm["X_umap"], np.memmap)
+        np.testing.assert_array_equal(run.obsp["connectivities"].data, ref.obsp["connectivities"].data)
+        np.testing.assert_array_equal(np.asarray(run.obs["leiden"]), np.asarray(ref.obs["leiden"]))
+        np.testing.assert_array_equal(np.asarray(run.obsm["X_umap"]), np.asarray(ref.obsm["X_umap"]))
+    conn = mapped.obsp["connectivities"]
+    for arr in (conn.indices, conn.data, mapped.obsm["X_umap"][:, :1]):
+        assert _results.mapping(arr) is not None
+        copy = _results.in_ram(arr)
+        assert _results.mapping(copy) is None and copy.base is None
+        np.testing.assert_array_equal(copy, arr)
+    ram = np.arange(4)
+    assert _results.mapping(ram) is None and _results.in_ram(ram) is ram
+
+
+def _on_a_network(monkeypatch, tmp_path, local: str) -> None:
+    """Every file looks as if on a network file system, and the temporary
+    folder (a fresh one) as if on a ``local`` file system."""
+    import sys
+    import tempfile
+
+    res = sys.modules["polariseq.resources"]   # the module (ps.resources is a function)
+    monkeypatch.setattr(res, "is_network_filesystem", lambda path: True)
+    monkeypatch.setattr(res, "filesystem_type", lambda path: local)
+    (tmp_path / "tmp").mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "tmp"))
+
+
+def test_on_a_network_the_inputs_are_copied_to_a_local_disk(proj, monkeypatch, tmp_path) -> None:
+    emb = mixture(12_000, seed=7)
+    ref = _graph_steps(None, emb)
+    _on_a_network(monkeypatch, tmp_path, "ext4")
+    ps.set_budget(ram_gb=0.01)
+    run = _graph_steps("copied", emb)
+    assert run.uns["neighbors"]["inputs"] == {"embedding": "mapped-local-copy",
+                                              "distances": "mapped-local-copy"}
+    assert run.uns["leiden"]["inputs"] == run.uns["umap"]["inputs"] == "mapped-local-copy"
+    np.testing.assert_array_equal(np.asarray(run.obs["leiden"]), np.asarray(ref.obs["leiden"]))
+    np.testing.assert_array_equal(np.asarray(run.obsm["X_umap"]), np.asarray(ref.obsm["X_umap"]))
+    assert not list((tmp_path / "tmp").glob("polariseq_inputs_*")), "copies left behind"
+
+
+def test_on_a_network_without_a_local_disk_the_step_warns(proj, monkeypatch, tmp_path) -> None:
+    import pytest
+
+    emb = mixture(12_000, seed=8)
+    ref = _graph_steps(None, emb)
+    _on_a_network(monkeypatch, tmp_path, "tmpfs")   # a cluster node's /tmp, held in memory
+    ps.set_budget(ram_gb=0.01)
+    with pytest.warns(RuntimeWarning, match="network file system"):
+        run = _graph_steps("network", emb)
+    assert run.uns["leiden"]["inputs"] == "mapped-network"
+    np.testing.assert_array_equal(np.asarray(run.obs["leiden"]), np.asarray(ref.obs["leiden"]))

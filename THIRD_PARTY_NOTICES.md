@@ -7,10 +7,14 @@ those tools, what Polariseq follows and where, and reproduces the notices
 their licences ask to be kept. Each module that follows another project's code
 says so in its own header as well.
 
-Some of the code followed is released under the GNU General Public License
-(edgeR, limma, statmod, igraph and harmonypy). Polariseq's public release will
-therefore carry a licence compatible with the GNU General Public License,
-version 3.
+None of the code Polariseq follows is under the GNU General Public License.
+Up to version 0.1.1, three modules followed code that is (edgeR, limma and
+statmod in `pseudobulk.rs`, igraph in `leiden.rs`, harmonypy in `harmony.rs`).
+From version 0.2.0 they are written anew from the published methods, from the
+tools' documentation and from code under permissive licences (CWTS
+networkanalysis, harmony-pytorch); edgeR, limma and harmonypy served only as
+references whose outputs were compared, never as code to follow (see "Methods
+implemented from publications" below).
 
 This file covers code that Polariseq follows. The libraries it builds on (Rust
 crates and Python packages) are dependencies under their own licences, which
@@ -27,11 +31,8 @@ their packages carry.
 | umap-learn | BSD-3-Clause | `umap.rs` |
 | PyNNDescent | BSD-2-Clause | `nndescent.rs` |
 | Scanpy | BSD-3-Clause | `preprocess.rs`, `pca.rs`, `de.rs`, `umap.rs`, `python/polariseq` |
-| edgeR | GPL (>= 2) | `pseudobulk.rs` |
-| limma | GPL (>= 2) | `pseudobulk.rs` |
-| statmod | GPL-2 or GPL-3 | `pseudobulk.rs` |
-| igraph | GPL-2.0-or-later | `leiden.rs` |
-| harmonypy | GPL-3.0-or-later | `harmony.rs` |
+| CWTS networkanalysis | MIT | `leiden.rs` |
+| harmony-pytorch | BSD-3-Clause | `harmony.rs` |
 
 The Rust modules are in `crates/polariseq-core/src/`.
 
@@ -131,58 +132,52 @@ the connectivities of `pp.neighbors` (`umap.rs`), and the t-test of
 `python/polariseq/__init__.py`). The Python package stores results in the
 places Scanpy uses, so that Scanpy's tools and plots read them.
 
-## Code under the GNU General Public License
+### CWTS networkanalysis
 
-### edgeR
+<https://github.com/CWTSLeiden/networkanalysis>. MIT, Copyright (c) 2018 Centre
+for Science and Technology Studies (CWTS), Leiden University.
 
-<https://bioconductor.org/packages/edgeR>. GPL (>= 2), Copyright Gordon
-Smyth, Yunshun Chen, Aaron Lun, Davis McCarthy, Mark Robinson and
-contributors.
+`leiden.rs` follows the Leiden algorithm of Traag, Waltman and van Eck (2019) as
+the authors' own implementation lays it out: fast local moving from a cyclic
+queue of unstable nodes with an empty cluster always among the candidates
+(`FastLocalMovingAlgorithm`), the refinement into well-connected sub-clusters
+with randomness 0.01 (`LocalMergingAlgorithm`), and the recursion on the
+reduced network, which carries node weights as sums
+(`LeidenAlgorithm`, `Network.createReducedNetwork`).
 
-`pseudobulk.rs` follows `filterByExpr`, `.calcFactorTMM` and `normLibSizes`
-(edgeR 4.10) for the comparison of conditions on pseudobulk counts.
+### harmony-pytorch
 
-### limma
+<https://github.com/lilab-bcb/harmony-pytorch>. BSD-3-Clause, Copyright (c)
+2019-2020 The Broad Institute, Inc. and The General Hospital Corporation,
+Copyright (c) 2021-present Genentech, Inc.
 
-<https://bioconductor.org/packages/limma>. GPL (>= 2), Copyright Gordon Smyth
-and contributors.
+`harmony.rs` follows harmony-pytorch's layout of Harmony (Korsunsky et al.
+2019): the clustering rounds over shuffled blocks with the other cells'
+tallies fixed, the objective and its convergence windows, and the
+mixture-of-experts ridge correction per cluster.
 
-`pseudobulk.rs` follows `lmFit`, `fitFDist`, `trigammaInverse`, `squeezeVar`
-and `eBayes` with `trend = TRUE` (limma 3.68).
+## Methods implemented from publications
 
-### statmod
+These steps give the same answers as established tools whose code is under the
+GNU General Public License. Their code was not followed: the steps are written
+from the publications and the tools' documentation, and where the
+documentation leaves a detail open, it was settled by comparing outputs.
 
-<https://cran.r-project.org/package=statmod>. GPL-2 or GPL-3, Copyright Gordon
-Smyth and contributors.
-
-`pseudobulk.rs` follows `logmdigamma`.
-
-### igraph
-
-<https://igraph.org>. GPL-2.0-or-later, Copyright (C) 2020-2025 The igraph
-development team.
-
-`leiden.rs` structures the Leiden algorithm (Traag, Waltman and van Eck 2019)
-as igraph's `igraph_community_leiden` does (`src/community/leiden.c`): fast
-local moving from a queue of unstable nodes, the refinement into
-well-connected parts, and two iterations from the previous partition, as
-`community_leiden(n_iterations=2)` runs.
-
-### harmonypy
-
-<https://github.com/slowkow/harmonypy>. GPL-3.0-or-later, Copyright (C) 2018
-Ilya Korsunsky, 2019 Kamil Slowikowski.
-
-`harmony.rs` follows harmonypy 2.0.2's C++ backend (`src/harmony.cpp`), a
-step-by-step port of R harmony 2 (<https://github.com/immunogenomics/harmony>,
-GPL-3): the initial centroids, the soft assignments with the diversity penalty
-updated in shuffled blocks, the objective and its convergence rules, and the
-ridge correction per cluster, with the penalty estimated from the expected
-counts and several batch variables at once (Korsunsky et al. 2019).
-
-The GNU General Public License, version 3, is at
-<https://www.gnu.org/licenses/gpl-3.0.html>, and version 2 at
-<https://www.gnu.org/licenses/old-licenses/gpl-2.0.html>.
+- **Pseudobulk testing** (`pseudobulk.rs`): the expression filter (Chen, Lun
+  and Smyth 2016; edgeR's `filterByExpr` documentation), TMM normalization
+  (Robinson and Oshlack 2010), log counts per million with a prior count
+  (edgeR's `cpm` and `addPriorCount` documentation), the moderated t with an
+  intensity trend (Smyth 2004; Phipson et al. 2016; Law et al. 2014). Checked
+  against edgeR 4.10.5 and limma 3.68.5 on 350 generated datasets and the Kang
+  et al. (2018) pseudobulk (`benchmarks/relicence/` on the reproduce branch). The special functions
+  follow the NIST Digital Library of Mathematical Functions; `lgamma` and
+  `erfc` are libm's.
+- **Harmony's later options** (`harmony.rs`): a penalty per batch variable,
+  the ridge penalty estimated as `alpha` times a batch's expected count, and
+  `batch_prop_cutoff`, as R harmony's documentation (`RunHarmony`,
+  `harmony_options`) describes them; the diversity weight and the centroids
+  taken from the ridge intercepts were chosen by comparing corrections with
+  harmonypy 2.0.2.
 
 ## Licence texts
 
@@ -496,6 +491,66 @@ modification, are permitted provided that the following conditions are met:
 * Neither the name of the copyright holder nor the names of its
   contributors may be used to endorse or promote products derived from
   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+### CWTS networkanalysis licence
+
+```text
+MIT License
+
+Copyright (c) 2018 Centre for Science and Technology Studies (CWTS), Leiden University
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### harmony-pytorch licence
+
+```text
+BSD 3-Clause License
+
+Copyright (c) 2019-2020 The Broad Institute, Inc. and The General Hospital Corporation.
+Copyright (c) 2021-present Genentech, Inc. for code commits from 2021 onward.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
 
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
 AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE

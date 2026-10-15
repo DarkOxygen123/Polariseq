@@ -388,6 +388,14 @@ def write_summary(out: Path, r: dict) -> Path:
               + (f"written during the run {r['disk_gb']['written_during_run']:.1f} GB."
                  if r["disk_gb"]["written_during_run"] is not None else ""), "",
               "## Outputs", "", ", ".join(sorted(r["outputs"]))]
+    gi = {k: v for k, v in (r.get("graph_inputs") or {}).items() if v}
+    if gi:
+        def how(v):
+            return ", ".join(f"{k} {w}" for k, w in v.items()) if isinstance(v, dict) else str(v)
+        at = lines.index("## Outputs")
+        lines[at:at] = ["Inputs of the graph steps (loaded: read into memory first; mapped: read "
+                        "in place from the project): "
+                        + "; ".join(f"{k}: {how(v)}" for k, v in gi.items()) + ".", ""]
     path = out / "run_summary.md"
     path.write_text("\n".join(lines) + "\n")
     return path
@@ -539,6 +547,10 @@ def main(argv: list[str] | None = None) -> int:
                     "written_during_run": use["disk_written_gb"],
                     "by_part": {k: v / GB for k, v in status.items()}},
         "steps": use["steps"],
+        # where neighbours, Leiden and UMAP read their inputs from: loaded into memory, or
+        # mapped (in place from the project's files, kept in the cache)
+        "graph_inputs": {k: adata.uns.get(k, {}).get("inputs")
+                         for k in ("neighbors", "leiden", "umap")},
         "machine": machine,
         "outputs": [Path(f).name for f in figures.values()]
                    + [logs["csv"].name, logs["png"].name, "report.json", "run_summary.md"]

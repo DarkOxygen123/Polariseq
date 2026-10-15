@@ -146,6 +146,7 @@ def test_the_counts_copy_lives_in_the_project_and_is_reused(proj, capsys) -> Non
 
 
 def test_gene_values_read_by_column_out_of_core(proj) -> None:
+    pytest.importorskip("scipy")
     mem = ps.read_h5ad(FIXTURE, mode="memory")
     ooc = ps.read_h5ad(FIXTURE, mode="out-of-core", name="fx")
     for a in (mem, ooc):

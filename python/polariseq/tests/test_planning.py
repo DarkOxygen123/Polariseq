@@ -155,14 +155,19 @@ class TestCostModel:
         shape = (800_000, 27_998, 1_607_496_131)
         p3 = estimate(*shape, budget(ram_gb=3), storage="spill", with_umap=False)
         assert not p3.fits
-        assert p3.min_budget_gb == pytest.approx(3.13, abs=0.15)
+        # 3.13 GB until 2026-10-15; 3.34 since the fixed process overhead
+        # was measured again (0.30 GB): still refused at 3 GB, met at 4.
+        assert p3.min_budget_gb == pytest.approx(3.34, abs=0.15)
         assert any("working-set floor" in w for w in p3.warnings)
         p4 = estimate(*shape, budget(ram_gb=4), storage="spill", with_umap=False)
-        assert p4.fits
-        # Measured 3.22 GB on the 800K sweep; planned higher since the
-        # gene-selection term (HVG_INFLIGHT_FACTOR, from the scTab runs) was
-        # added: over, the safe side, and still inside the 4 GB asked for.
-        assert p4.peak_gb == pytest.approx(3.94, abs=0.15)
+        # 4 GB is above the floor, so the run goes ahead (only a budget below
+        # the floor is refused). Measured 3.22 GB on the 800K sweep of
+        # 2026-09 and 1.93 GB under the default in revision 4; planned higher
+        # since the gene-selection term (HVG_INFLIGHT_FACTOR, from the scTab
+        # runs) was added and the process overhead measured again (0.30 GB):
+        # the safe side, at about the budget asked for.
+        assert p4.min_budget_gb < 4.0
+        assert p4.peak_gb == pytest.approx(4.09, abs=0.15)
         # Block sizing is untouched by the floor: 6 GB still picks 12,288
         # rows on this density, the size the measured ladder ran at.
         p6 = estimate(*shape, budget(ram_gb=6), storage="spill", with_umap=False)
@@ -174,7 +179,7 @@ class TestCostModel:
                          storage="spill", with_umap=False)
         big = estimate(4_000_000, 27_998, 8_037_480_655, budget(ram_gb=8),
                        storage="spill", with_umap=False)
-        assert small.min_budget_gb == pytest.approx(2.0, abs=0.2)
+        assert small.min_budget_gb == pytest.approx(2.2, abs=0.2)
         # Residency saturates at the cap, so the floor stops growing with nnz.
         assert big.min_budget_gb < 4.0
 
@@ -188,7 +193,7 @@ class TestCostModel:
         p = estimate(800_000, 27_998, 1_607_496_131, budget(ram_gb=6),
                      storage="spill", with_umap=False)
         s = p.summary()
-        assert s["min_budget_gb"] == pytest.approx(3.1, abs=0.2)
+        assert s["min_budget_gb"] == pytest.approx(3.34, abs=0.2)
         assert "min_budget_gb" in s
 
     def test_max_cells_tracks_the_budget_and_the_mode(self) -> None:
@@ -206,7 +211,7 @@ class TestCostModel:
 
     def test_graph_stages_are_called_out_as_storage_independent(self) -> None:
         """Past a certain scale the matrix is not the problem — say so."""
-        p = estimate(20_000_000, 30_000, 20_000_000 * 500, budget(ram_gb=8), storage="spill")
+        p = estimate(20_000_000, 30_000, 20_000_000 * 500, budget(ram_gb=8), n_pcs=10, storage="spill")
         assert p.limiting_step in {"neighbors", "leiden", "umap"}
         assert "not help" in p.report()
 
@@ -216,8 +221,8 @@ class TestAgainstMeasurement:
         """The model must track a measured peak, not just be self-consistent.
 
         Bound is deliberately loose (within 2x): peak RSS includes allocator
-        behaviour nobody models exactly. The tight agreement lives in the
-        handbook's scaling chapter, where it is measured on real atlases;
+        behaviour nobody models exactly. The tight agreement is measured on real
+        atlases with the benchmarks of the reproduce branch;
         this test is here to catch the model drifting away from reality.
         """
         # getrusage is POSIX-only; on Windows the rest of this module runs.
@@ -365,8 +370,12 @@ class TestDensityAndPerCellTerms:
                          densest_nnz_per_row=4_857)
         assert self.step(avg, "hvg") < 20.0, "at the average density, the figure first planned"
         assert 0.97 <= self.step(dense, "hvg") / 39.16 <= 1.05
-        assert dense.limiting_step == "hvg"
-        assert 0.97 <= dense.peak_gb / 39.16 <= 1.05
+        # The run's peak (39.4 GB, in gene selection) is planned at or just
+        # above it: since 0.2.0 a 100 GB budget reads the graph steps' inputs
+        # into memory, and UMAP, which then holds its graph twice, is planned
+        # at about 40 GB (the 0.1.x run read them in place: 33.9 GB).
+        assert dense.limiting_step in ("hvg", "umap")
+        assert 1.0 <= dense.peak_gb / 39.4 <= 1.05
         assert "densest file" in dense.report()
         # The same headroom reproduces the 4-thread run's gene-selection step.
         four = estimate(*self.SHAPE, budget(100.0, threads=4), storage="spill", n_files=100,
@@ -375,10 +384,10 @@ class TestDensityAndPerCellTerms:
 
     def test_a_density_well_below_the_average_changes_nothing(self) -> None:
         # The headroom stands for blocks that are denser than their file's
-        # average, so a density below average / 1.2 cannot raise the charge.
+        # average, so a density below average / 1.25 cannot raise the charge.
         b = budget(100.0, threads=8)
         base = estimate(*self.SHAPE, b, storage="spill", n_files=100)
-        for given in (None, 500, 1_700):
+        for given in (None, 500, 1_600):
             same = estimate(*self.SHAPE, b, storage="spill", n_files=100,
                             densest_nnz_per_row=given)
             assert same.summary()["steps"] == base.summary()["steps"]
@@ -398,16 +407,76 @@ class TestDensityAndPerCellTerms:
 
     def test_pca_and_umap_cost_a_fixed_number_of_bytes_per_cell(self) -> None:
         big = estimate(*self.SHAPE, budget(100.0, threads=8), storage="spill", n_files=100)
-        assert 0.95 <= self.step(big, "pca") / 28.39 <= 1.05
-        assert 0.95 <= self.step(big, "umap") / 29.39 <= 1.10
+        # PCA's peak is planned at or above the two measurements (28.39 GB on
+        # 22.19M cells, 2.81 GB on 2.22M); since 2026-10-15 the plan also
+        # counts the Gram matrix's partial sums (about 1 GB) and the cells'
+        # annotations, so it is 11 to 15% above them.
+        assert 1.0 <= self.step(big, "pca") / 28.39 <= 1.15
         ten = estimate(2_219_070, 19_331, 4_110_559_436, budget(100.0, threads=4),
                        storage="spill", n_files=10)
-        assert 0.95 <= self.step(ten, "pca") / 2.81 <= 1.20
-        assert 0.95 <= self.step(ten, "umap") / 3.13 <= 1.10
-        # Almost proportional to the cells (the covariance part is fixed), as
-        # the two measurements were: 10.0 times the cells, 10.1 times the memory.
-        ratio = (self.step(big, "pca") - 0.15) / (self.step(ten, "pca") - 0.15)
-        assert 0.85 <= ratio / (22_190_622 / 2_219_070) <= 1.05
+        assert 1.0 <= self.step(ten, "pca") / 2.81 <= 1.70
+        # UMAP's working memory above the structures it reads, refitted on
+        # 0.2.0 (2026-10-14): the highest implied, 41 bytes per entry on the
+        # 4.0M-cell fetal atlas (example 06 on Windows), is planned at or just
+        # above; 0.1.x's 17.5 GB on 22.19M cells and 1.80 GB on 2.22M (31 bytes
+        # per entry) stay below the plan.
+        from polariseq.planning import FUZZY_ENTRY_FACTOR, umap_working_bytes
+        fetal = int(4_000_604 * 15 * FUZZY_ENTRY_FACTOR)
+        assert 1.03 <= umap_working_bytes(fetal, 4_000_604) / (41.2 * fetal) <= 1.10
+        for n, measured in ((22_190_622, 17.5), (2_219_070, 1.80)):
+            work = umap_working_bytes(int(n * 15 * FUZZY_ENTRY_FACTOR), n) / 1e9
+            assert 1.0 <= work / measured <= 1.50, (n, work)
+        # Per cell, the plan grows as the two measurements did (1.28 KB a cell
+        # between them), at or a little above.
+        measured = (28.39 - 2.81) / (22_190_622 - 2_219_070)
+        planned = (self.step(big, "pca") - self.step(ten, "pca")) / (22_190_622 - 2_219_070)
+        assert 1.0 <= planned / measured <= 1.12
+
+    def test_the_neighbours_peak_tracks_the_runs_it_was_fitted_on(self) -> None:
+        """Measured on a compute node (0.2.0, anonymous memory, GB), the neighbours step
+        alone on the Tahoe-100M embedding: 20M cells, embedding in memory, at 4,
+        8, 12 and 16 threads 17.38, 17.45, 17.83, 17.52; 40M at 16 threads
+        34.70; 95.6M at 16 threads, embedding read in place, 62.63. The plan is
+        of resident memory, which also counts the embedding file's pages
+        (n x 50 x 4 bytes): measured directly on all 95.6M cells with the
+        embedding in memory, 99.5 GB resident against 81.75 anonymous (those runs
+        read slices of that file, whose pages their resident memory also holds,
+        so anonymous memory plus the step's own embedding stands for it). The
+        plan must be at or a little above each."""
+        from polariseq.planning import OBS_BYTES_PER_CELL
+
+        def nbr(n, threads, ram_gb):
+            # These runs held no cell annotations, so their share of the plan
+            # (OBS_BYTES_PER_CELL) is left out of the comparison.
+            p = estimate(n, 30_000, n * 1_500, budget(ram_gb, threads=threads), storage="spill")
+            return (self.step(p, "neighbors") - n * OBS_BYTES_PER_CELL / 1e9,
+                    p.summary()["graph_inputs"]["neighbors"])
+
+        def resident(n, anon):
+            return anon + n * 50 * 4 / 1e9
+
+        for threads, anon in ((4, 17.38), (8, 17.45), (12, 17.83), (16, 17.52)):
+            planned, inputs = nbr(20_000_000, threads, 500.0)
+            assert inputs == "loaded"
+            assert 1.0 <= planned / resident(20_000_000, anon) <= 1.20, (threads, planned)
+        planned, _ = nbr(40_000_000, 16, 500.0)
+        assert 1.0 <= planned / resident(40_000_000, 34.70) <= 1.20, planned
+        planned, inputs = nbr(95_596_109, 16, 80.0)
+        assert inputs == "mapped"
+        assert 1.0 <= planned / resident(95_596_109, 62.63) <= 1.20, planned
+        planned, inputs = nbr(95_596_109, 16, 400.0)
+        assert inputs == "loaded"
+        assert 1.0 <= planned / 99.5 <= 1.20, planned
+
+    def test_neighbours_peak_grows_with_the_cells_and_barely_with_the_threads(self) -> None:
+        def nbr(n, threads):
+            return self.step(estimate(n, 30_000, n * 1_500, budget(500.0, threads=threads),
+                                      storage="spill"), "neighbors")
+        assert nbr(20_000_000, 4) < nbr(20_000_000, 16) < 1.03 * nbr(20_000_000, 4)
+        # proportional to the cells at a fixed thread count (the fixed overhead
+        # aside), as the 20M, 40M and 95.6M measurements were
+        ratio = (nbr(40_000_000, 16) - 0.15e0) / (nbr(20_000_000, 16) - 0.15e0)
+        assert 1.95 <= ratio <= 2.05, ratio
 
     def test_where_blocks_are_even_the_headroom_errs_high_not_low(self) -> None:
         # The first shards are uniform (densest file 2,076 against an average
@@ -421,3 +490,44 @@ class TestDensityAndPerCellTerms:
         two = estimate(443_814, 19_331, 825_266_640, budget(100.0, threads=4),
                        storage="spill", n_files=2, densest_nnz_per_row=2_026)
         assert 1.0 <= two.peak_gb / 7.28 <= 1.35
+
+
+class TestGraphInputs:
+    def test_the_rule_needs_the_budget_and_the_free_memory(self) -> None:
+        from polariseq.planning import loads_inputs
+        assert loads_inputs(1, 2, 3, 6)
+        assert not loads_inputs(1, 2, 4, 6)
+        assert loads_inputs(1, 2, 3, 6, available=10)
+        assert not loads_inputs(1, 2, 3, 6, available=6)   # 5 > 0.8 x 6
+
+    def test_the_plan_reads_inputs_in_place_when_they_do_not_fit(self) -> None:
+        shape = (4_000_000, 30_000, 4_000_000 * 1_500)
+        rich = estimate(*shape, budget(ram_gb=60, threads=4), storage="spill")
+        lean = estimate(*shape, budget(ram_gb=2, threads=4), storage="spill")
+        assert set(rich.summary()["graph_inputs"].values()) == {"loaded"}
+        assert set(lean.summary()["graph_inputs"].values()) == {"mapped"}
+        # read in place, the inputs are not counted
+        emb = 4_000_000 * 50 * 4
+        r = {s.name: s for s in rich.steps}
+        m = {s.name: s for s in lean.steps}
+        assert r["neighbors"].peak - m["neighbors"].peak == emb
+        assert r["leiden"].peak > m["leiden"].peak
+        assert "in place" in m["leiden"].note and "into memory" in r["leiden"].note
+
+    def test_free_memory_respects_a_slurm_allocation(self, monkeypatch) -> None:
+        from polariseq.resources import free_memory_now
+        monkeypatch.setenv("SLURM_MEM_PER_NODE", "100")   # MB
+        assert free_memory_now() <= 100 * 1024 * 1024
+        monkeypatch.delenv("SLURM_MEM_PER_NODE")
+        monkeypatch.setenv("SLURM_MEM_PER_CPU", "50")
+        monkeypatch.setenv("SLURM_CPUS_ON_NODE", "2")
+        assert free_memory_now() <= 100 * 1024 * 1024
+
+    def test_a_network_project_is_warned_about_reading_in_place(self) -> None:
+        shape = (4_000_000, 30_000, 4_000_000 * 1_500)
+        lean = estimate(*shape, budget(ram_gb=2, threads=4), storage="spill", network_project=True)
+        assert any("network file system" in w for w in lean.warnings)
+        rich = estimate(*shape, budget(ram_gb=60, threads=4), storage="spill", network_project=True)
+        assert not any("network file system" in w for w in rich.warnings)
+        local = estimate(*shape, budget(ram_gb=2, threads=4), storage="spill")
+        assert not any("network file system" in w for w in local.warnings)

@@ -230,6 +230,7 @@ def test_filter_genes_counts_the_cells_left_after_filter_cells() -> None:
     """Scanpy counts a gene's cells on the matrix as it is when filter_genes
     runs. Counting from an earlier calculate_qc_metrics included the cells
     filter_cells had removed, and so kept genes Scanpy drops."""
+    pytest.importorskip("scipy")
     a = ps.read_h5ad(FIXTURE)
     ps.pp.calculate_qc_metrics(a)
     ps.pp.filter_cells(a, min_genes=180)

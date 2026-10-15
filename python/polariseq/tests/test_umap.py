@@ -1,6 +1,6 @@
 """UMAP layout quality: cluster purity, trustworthiness, determinism.
 
-The layout is judged the way the handbook prescribes: a 20k Gaussian
+The layout is judged on a 20k Gaussian
 mixture with known clusters must stay separated (leave-self-out kNN purity
 of the 2-D layout) and preserve input neighborhoods (standard
 trustworthiness, within 0.01 of umap-learn's layout on the same data).
@@ -185,13 +185,13 @@ def _rolled_sheet(n: int = 6_000, seed: int = 0) -> np.ndarray:
 def test_multilevel_start_approaches_the_graphs_eigenvectors() -> None:
     """From the group graph's exact solution, smoothing moves the start towards the leading
     eigenvectors of the cell graph, and it starts nearer to them than the default start ends."""
-    import scipy.sparse as sp
+    sp = pytest.importorskip("scipy.sparse")
     from polariseq._polariseq import (
         umap_kmeans_labels,
         umap_multilevel_layout,
         umap_spectral_layout,
     )
-    from scipy.sparse.linalg import eigsh
+    eigsh = pytest.importorskip("scipy.sparse.linalg").eigsh
 
     X = _rolled_sheet()
     adata = ps.AnnData(X=np.zeros((len(X), 1), dtype=np.float32))

@@ -1,14 +1,16 @@
 [build-system]
-requires = ["maturin>=1.7,<2.0"]
+# pip fetches these for the build: maturin (which also installs Rust when it is missing, from 1.13 on
+# Windows too) and CMake, which builds the bundled HDF5. A C compiler is the one tool to have installed.
+requires = ["maturin>=1.13,<2.0", "cmake>=3.16"]
 build-backend = "maturin"
 
 [project]
 name = "polariseq"
-version = "0.1.1"
+version = "0.2.0"
 description = "Fast, memory-aware single-cell RNA-seq analysis, in memory or out of core, from a laptop to atlas scale"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "GPL-3.0-or-later" }
+license = { text = "PolyForm-Noncommercial-1.0.0 with additional terms (see LICENSE)" }
 authors = [
     { name = "Uthamkumar M", email = "uthamkumar.work@gmail.com" },
     { name = "Abhi Dutta" },
@@ -17,7 +19,6 @@ authors = [
 keywords = ["single-cell", "scRNA-seq", "bioinformatics", "out-of-core", "atlas", "clustering", "UMAP"]
 classifiers = [
     "Development Status :: 4 - Beta",
-    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     "Operating System :: MacOS",
     "Operating System :: Microsoft :: Windows",
     "Operating System :: POSIX :: Linux",
@@ -31,11 +32,10 @@ classifiers = [
     "Programming Language :: Rust",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
+# The analysis itself needs NumPy and pandas only. Everything else is an extra, by purpose.
 dependencies = [
     "numpy>=1.24",
-    "scipy>=1.10",
-    "matplotlib>=3.7",
-    "pandas>=2.0",  # imported by polariseq.plotting at import time
+    "pandas>=2.0",
 ]
 
 [project.urls]
@@ -46,24 +46,45 @@ Issues = "https://github.com/DarkOxygen123/Polariseq/issues"
 Changelog = "https://github.com/DarkOxygen123/Polariseq/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
-annotation = [
-    "anndata>=0.10",
-    "pandas>=2.0",
+# Figures: ps.pl (UMAP, dot plots, violins, heatmaps, volcano plots, overview figures).
+plot = [
+    "matplotlib>=3.7",
 ]
+# Results as SciPy sparse matrices (the neighbour graph in adata.obsp, .to_scipy(), adata.sample()),
+# to hand them to other tools.
+scipy = [
+    "scipy>=1.10",
+]
+# adata.to_anndata() and .h5ad export, for Scanpy and the tools built on AnnData.
+anndata = [
+    "anndata>=0.10",
+    "scipy>=1.10",
+]
+annotation = [  # the earlier name of `anndata`
+    "anndata>=0.10",
+    "scipy>=1.10",
+]
+# CellTypist cell-type annotation.
 celltypist = [
     "celltypist>=1.0",
     "anndata>=0.10",
-    "pandas>=2.0",
+    "scipy>=1.10",
 ]
-interactive = [
-    "plotly>=5.0",
-    "kaleido>=0.2",
+# Every extra above. Listed out, not as polariseq[...]: `maturin develop --extras all` passes the
+# list to pip, which would look for a polariseq release elsewhere.
+all = [
+    "matplotlib>=3.7",
+    "anndata>=0.10",
+    "scipy>=1.10",
+    "celltypist>=1.0",
 ]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "ruff>=0.6",
-    "maturin>=1.7,<2.0",
+    "maturin>=1.13,<2.0",
+    "matplotlib>=3.7",
+    "scipy>=1.10",
     "scanpy>=1.10",
     "anndata>=0.10",
 ]
@@ -80,6 +101,7 @@ manifest-path = "crates/polariseq-python/Cargo.toml"
 include = [
     { path = "LICENSE", format = "sdist" },
     { path = "THIRD_PARTY_NOTICES.md", format = "sdist" },
+    { path = "CITATION.cff", format = "sdist" },
 ]
 
 [tool.ruff]

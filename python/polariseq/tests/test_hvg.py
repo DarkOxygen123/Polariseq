@@ -23,7 +23,8 @@ from pathlib import Path
 import numpy as np
 import polariseq as ps
 import pytest
-import scipy.sparse as sp
+
+sp = pytest.importorskip("scipy.sparse")
 
 REPO = Path(__file__).resolve().parents[3]
 N_TOP, N_BINS = 500, 20

@@ -6,7 +6,7 @@ or a notebook.
 ## 0. Install and get data
 
 ```bash
-pip install polariseq
+pip install "polariseq[plot] @ git+https://github.com/DarkOxygen123/Polariseq.git"   # with figures; prerequisites: INSTALL.md
 mkdir -p data/pbmc3k && cd data/pbmc3k
 curl -O https://cf.10xgenomics.com/samples/cell-exp/1.1.0/pbmc3k/pbmc3k_filtered_gene_bc_matrices.tar.gz
 tar -xzf pbmc3k_filtered_gene_bc_matrices.tar.gz && cd ../..

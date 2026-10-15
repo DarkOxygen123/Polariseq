@@ -16,6 +16,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+pytest.importorskip("matplotlib")  # example 06 draws its figures: the plot extra
+
 EXAMPLES = Path(__file__).resolve().parents[3] / "examples"
 
 
@@ -79,6 +81,7 @@ def test_the_tracker_times_steps_and_records_what_they_held(tmp_path) -> None:
 
 
 def test_a_folder_of_shards_reads_as_one_dataset(proj, tmp_path) -> None:
+    pytest.importorskip("anndata")
     import anndata as ad
 
     whole = ad.read_h5ad(EXAMPLES.parent / "tests/data/medium_10kx2k.h5ad")
@@ -115,6 +118,7 @@ def test_exported_cells_name_their_file_and_carry_the_columns_asked_for(proj, tm
     from 0 in each), so the export names each cell's file and keeps columns of
     the input on request, still lined up with the cells that passed quality
     control."""
+    pytest.importorskip("anndata")
     import anndata as ad
     import numpy as np
 
@@ -208,6 +212,7 @@ def _shards(tmp_path, edit=None):
 
 
 def test_normalized_values_in_x_are_declined_before_the_run(proj, tmp_path, capsys) -> None:
+    pytest.importorskip("anndata")
     def normalize(k, part):
         if k == 1:
             part.X = part.X * 0.5
@@ -222,6 +227,7 @@ def test_normalized_values_in_x_are_declined_before_the_run(proj, tmp_path, caps
 
 
 def test_files_that_share_no_gene_names_are_declined(proj, tmp_path, capsys) -> None:
+    pytest.importorskip("anndata")
     def rename(k, part):
         if k == 1:
             part.var_names = [f"ENSG{i:011d}" for i in range(part.n_vars)]

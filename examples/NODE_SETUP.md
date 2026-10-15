@@ -1,9 +1,9 @@
 # Running Polariseq on another machine
 
-Most machines need only `pip install polariseq` (see [INSTALL.md](../INSTALL.md)).
-This guide is for a node or server where that does not work: no prebuilt package
-exists for the platform (for example Linux on ARM, Alpine, or a system with an
-old C library), the machine cannot reach PyPI, or you want to build from source.
+Most machines need only `pip install "git+https://github.com/DarkOxygen123/Polariseq.git"` (see [INSTALL.md](../INSTALL.md)).
+This guide is for a node or server where that does not work: the build tools cannot
+be installed there, the machine cannot reach GitHub or the package indexes, or you
+want to work in a clone of the code.
 You take the code from git, build it in a virtual environment inside the clone,
 and run the examples from there. No root is needed, and nothing goes into the
 system Python. Everything below was run from a fresh clone.
@@ -28,6 +28,7 @@ system Python. Everything below was run from a fresh clone.
 | git | to clone |
 | C compiler | `gcc` or `cc` (`module load gcc`, or build-essential) |
 | Rust | the stable toolchain from [rustup](https://rustup.rs), installed into your home, no root |
+| CMake | 3.16 or newer, which builds the bundled HDF5 (`module load cmake`, or `pip install cmake` into the environment) |
 | Disk | about 3 GB for the build, then room for the run (section 5) |
 
 The HDF5 reader is built from source, so no system HDF5 is needed. A first
@@ -56,7 +57,7 @@ bash examples/setup_node.sh --install-rust  # install Rust into ~/.cargo first
 bash examples/setup_node.sh --python python3.12
 ```
 
-The script checks Python, Rust and a C compiler; creates `.venv` inside the
+The script checks Python, Rust, a C compiler and CMake; creates `.venv` inside the
 clone; installs the dependencies and `maturin`; builds Polariseq in release
 mode; and finishes by running example 06 on the bundled fixture, so a clean
 finish means the install works. Run it again after a `git pull` to rebuild.
@@ -295,6 +296,7 @@ the pipeline returns.
 | `declined: the datasets share no genes` | the files name their genes differently (symbols in one, Ensembl ids in another); make them match. A `WARNING: only N genes are in every file` means the same, partly |
 | `Rust is not installed` | re-run `setup_node.sh` with `--install-rust`, or install from rustup.rs, or build a wheel elsewhere (section 4) |
 | `linker 'cc' not found` | no C compiler: `module load gcc` or install build-essential |
+| `failed to execute command: ... "cmake"` or `is \`cmake\` not installed?` | no CMake: `module load cmake`, or `pip install cmake` into the environment |
 | `No module named polariseq._polariseq` | the extension was not built into this environment: activate `.venv` and run `maturin develop --release` |
 | everything is slow | a build without `--release` |
 | the job is killed with no Python error | out of memory under the scheduler: raise `--mem` to at least a quarter above `--ram-gb`, or lower `--ram-gb` |
@@ -318,14 +320,15 @@ source on Windows is described in [INSTALL.md](../INSTALL.md).
 (Get-PSDrive D).Free / 1GB                                            # free disk on D:, GB
 ```
 
-**Set up.** Install 64-bit Python 3.10 to 3.14 from python.org and Git for
-Windows, then (PowerShell):
+**Set up.** Install 64-bit Python 3.10 to 3.14 from python.org, Git for Windows,
+Rust (rustup.rs), CMake and Build Tools for Visual Studio ("Desktop development
+with C++"), then (PowerShell):
 
 ```powershell
 python -m venv D:\polariseq-env
-D:\polariseq-env\Scripts\python.exe -m pip install polariseq anndata psutil
 git clone https://github.com/DarkOxygen123/Polariseq.git D:\polariseq
 cd D:\polariseq
+D:\polariseq-env\Scripts\python.exe -m pip install . anndata psutil
 D:\polariseq-env\Scripts\python.exe examples\01_quickstart.py
 ```
 

@@ -30,7 +30,8 @@ import tempfile
 from dataclasses import dataclass, replace
 from typing import Any
 
-__all__ = ["Resources", "Budget", "detect_resources"]
+__all__ = ["Resources", "Budget", "detect_resources", "free_memory_now", "filesystem_type",
+           "is_network_filesystem"]
 
 _GB = 1_000_000_000
 
@@ -213,6 +214,130 @@ def free_disk_bytes(path: str) -> int:
         return shutil.disk_usage(probe or "/").free
     except OSError:
         return 0
+
+
+def _read_int(path: str) -> int | None:
+    try:
+        with open(path, encoding="ascii") as fh:
+            text = fh.read().strip()
+    except OSError:
+        return None
+    return int(text) if text.isdigit() else None
+
+
+def _own_rss_bytes() -> int:
+    """This process's resident memory now (Linux; 0 elsewhere)."""
+    try:
+        with open("/proc/self/statm", encoding="ascii") as fh:
+            return int(fh.read().split()[1]) * os.sysconf("SC_PAGE_SIZE")
+    except (OSError, ValueError, IndexError):
+        return 0
+
+
+def _job_headroom_bytes() -> int | None:
+    """What the job or container this process runs in may still take: the
+    limit of its memory cgroup less what the cgroup uses, and the Slurm
+    allocation less what this process holds, the smaller of the two; None
+    where neither applies. Clusters differ: some Slurm setups enforce ``--mem``
+    by accounting and leaves the cgroup unlimited, others limit the cgroup."""
+    found: list[int] = []
+    try:
+        with open("/proc/self/cgroup", encoding="ascii") as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        lines = []
+    for line in lines:
+        _, controllers, path = line.split(":", 2)
+        if controllers == "":   # cgroup v2
+            limit = _read_int(f"/sys/fs/cgroup{path}/memory.max")
+            used = _read_int(f"/sys/fs/cgroup{path}/memory.current")
+        elif "memory" in controllers.split(","):   # cgroup v1
+            limit = _read_int(f"/sys/fs/cgroup/memory{path}/memory.limit_in_bytes")
+            used = _read_int(f"/sys/fs/cgroup/memory{path}/memory.usage_in_bytes")
+        else:
+            continue
+        if limit is not None and used is not None and limit < 1 << 60:
+            found.append(max(0, limit - used))
+    mb = os.environ.get("SLURM_MEM_PER_NODE", "")
+    if not mb.isdigit():
+        per_cpu, cpus = os.environ.get("SLURM_MEM_PER_CPU", ""), os.environ.get("SLURM_CPUS_ON_NODE", "")
+        mb = str(int(per_cpu) * int(cpus)) if per_cpu.isdigit() and cpus.isdigit() else ""
+    if mb.isdigit() and int(mb) > 0:
+        found.append(max(0, int(mb) * 1024 * 1024 - _own_rss_bytes()))
+    return min(found) if found else None
+
+
+#: File systems reached over a network: a page read through a memory map
+#: there is a round trip, and a node may drop cached pages at any time.
+NETWORK_FILESYSTEMS = frozenset({
+    "nfs", "nfs4", "lustre", "gpfs", "beegfs", "cifs", "smb3", "smbfs", "afpfs", "webdav", "ceph",
+    "fuse.ceph", "glusterfs", "fuse.glusterfs", "fuse.sshfs", "9p", "afs", "panfs", "wekafs", "pvfs2",
+    "orangefs", "remote",
+})
+#: File systems held in memory: a file there costs memory like an array.
+MEMORY_FILESYSTEMS = frozenset({"tmpfs", "ramfs", "rootfs"})
+
+
+def _mount_table() -> list[tuple[str, str]]:
+    """(mount point, file system) of every mount: /proc/mounts on Linux,
+    ``mount`` on macOS; empty elsewhere."""
+    try:
+        with open("/proc/mounts", encoding="utf-8") as fh:
+            return [(parts[1], parts[2]) for parts in (line.split() for line in fh) if len(parts) >= 3]
+    except OSError:
+        pass
+    if platform.system() == "Darwin":
+        try:
+            out = subprocess.run(["/sbin/mount"], capture_output=True, text=True, timeout=5,
+                                 check=True).stdout
+        except (OSError, subprocess.SubprocessError):
+            return []
+        table = []
+        for line in out.splitlines():   # "/dev/disk3s1 on / (apfs, local, journaled)"
+            head, sep, rest = line.partition(" (")
+            if sep and " on " in head:
+                table.append((head.split(" on ", 1)[1], rest.split(",")[0].strip(") ")))
+        return table
+    return []
+
+
+def filesystem_type(path: str) -> str | None:
+    """The file system ``path`` lives on: the type of the mount that is its
+    longest prefix (Linux, macOS); on Windows ``"remote"`` for a network drive
+    or share and ``"local"`` otherwise; None if unknown."""
+    real = os.path.realpath(path)
+    if platform.system() == "Windows":
+        if real.startswith("\\\\"):
+            return "remote"
+        try:
+            import ctypes
+
+            drive = os.path.splitdrive(real)[0] + "\\"
+            return "remote" if ctypes.windll.kernel32.GetDriveTypeW(drive) == 4 else "local"
+        except (AttributeError, OSError):
+            return None
+    best, kind = "", None
+    for mount, fs in _mount_table():
+        inside = real == mount or real.startswith(mount.rstrip("/") + "/")
+        if inside and len(mount) >= len(best):
+            best, kind = mount, fs
+    return kind
+
+
+def is_network_filesystem(path: str) -> bool:
+    return filesystem_type(path) in NETWORK_FILESYSTEMS
+
+
+def free_memory_now() -> int:
+    """Memory that could be taken now: what the machine has available,
+    capped by what the job or container this process runs in may still take
+    (see :func:`_job_headroom_bytes`)."""
+    total = _total_ram_bytes()
+    avail, _ = _available_ram_bytes(total)
+    if total:
+        avail = min(avail, total)
+    job = _job_headroom_bytes()
+    return avail if job is None else min(avail, job)
 
 
 def detect_resources(spill_dir: str | None = None) -> Resources:

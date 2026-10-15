@@ -6,31 +6,34 @@
     clippy::doc_markdown,
     clippy::too_many_lines
 )]
-// Single-character names (i, j, k, a, b, c, w, q, m) follow the algorithm's
-// notation in Traag et al. (2019) and igraph's implementation.
+// Single-character names (i, j, k, c, r, s, t, u, v, w) follow the notation of
+// Traag, Waltman & van Eck (2019).
 
-//! Leiden community detection (Traag, Waltman & van Eck 2019) on CSR.
+//! Leiden community detection (Traag, Waltman & van Eck 2019, "From Louvain
+//! to Leiden: guaranteeing well-connected communities", Sci. Rep. 9, 5233)
+//! on CSR.
 //!
-//! One Leiden *level* is fast local moving (queue-based Louvain phase 1) →
-//! refinement into well-connected sub-communities → aggregation onto the
-//! refined partition. Levels repeat until nothing moves and refinement
-//! splits nothing. The whole procedure runs twice starting from the
-//! previous partition (igraph's `community_leiden(n_iterations=2)`
-//! convention), keeping the best partition found.
+//! The algorithm follows the paper's Algorithms A.2 and A.3 and the
+//! reference implementation by the same authors, CWTS `networkanalysis`
+//! (https://github.com/CWTSLeiden/networkanalysis, MIT licence, Copyright (c)
+//! 2018 Centre for Science and Technology Studies (CWTS), Leiden University;
+//! see `THIRD_PARTY_NOTICES.md`): fast local moving, refinement into
+//! well-connected sub-clusters, reduction of the graph onto the refined
+//! partition, repeated on the reduced graph until nothing moves.
 //!
-//! Everything is arrays: the neighbour-community accumulation uses a dense
-//! scratch vector plus a touched list (no hashing), aggregation is a
-//! counting-sort CSR build, and one `ChaCha8` stream drives the node order
-//! and the refinement choices — same graph and seed ⇒ identical output.
+//! The quality function is modularity with resolution γ, written as the
+//! constant Potts model with node weights `k_i` (the strengths) and
+//! resolution `γ / 2m`, as in the CWTS code. Two iterations from the previous
+//! partition are run, the number Scanpy's documentation recommends.
 //!
-//! The local moving, the refinement and the two-iteration scheme are
-//! structured as igraph's `igraph_community_leiden` (`src/community/leiden.c`,
-//! GPL-2.0-or-later, Copyright (C) 2020-2025 The igraph development team).
-//! Polariseq is therefore to be distributed under a licence compatible with
-//! the GPL, version 3 (see `THIRD_PARTY_NOTICES.md`).
+//! The data layout is our own: the graph is borrowed in place (it can be a
+//! memory-mapped file), the sums over neighbouring clusters use a dense
+//! scratch vector and the list of clusters touched, reductions are a
+//! counting-sort CSR build with the rows merged in parallel, and one
+//! `ChaCha8` stream drives every random choice, so the same graph and seed
+//! give the same output.
 
 use std::borrow::Cow;
-use std::collections::VecDeque;
 
 use crate::backend::NeighborGraph;
 use crate::umap;
@@ -39,22 +42,23 @@ use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use rayon::prelude::*;
 
-/// Safety cap on Leiden levels per run (convergence usually takes 3–6).
+/// Safety cap on levels (reduced graphs) per iteration; convergence usually
+/// takes 3 to 6.
 const MAX_LEVELS: usize = 20;
 
-/// Outer Leiden iterations — igraph's `n_iterations=2`. Measured on
-/// heart_100k: further iterations to the fixed point (~9) buy +0.0002
-/// modularity for ~3x the time, and the degenerate-coarsening pass makes
-/// them redundant.
-const MAX_OUTER_ITERATIONS: usize = 2;
+/// Leiden iterations, each continuing from the partition the previous one
+/// left (the CWTS code's `nIterations`; Scanpy's documentation recommends 2).
+const OUTER_ITERATIONS: usize = 2;
 
-/// Softmax temperature for refinement merge choices.
+/// Randomness θ of the refinement (the CWTS default, 0.01).
 const THETA: f64 = 0.01;
 
 /// Weighted undirected graph in CSR form: both directions stored, rows
 /// sorted by column, self-loops (aggregate graphs) as a single entry.
-/// Sums are f64; `strength[i]` counts self-loops twice and `two_m` is
-/// Σ strength, the igraph convention.
+/// Sums are f64. `strength[i]` is the node's weight in the quality function:
+/// its row sum (a self-loop counted twice) for a graph given by the caller,
+/// the sum of its members' strengths for a reduced graph. `two_m` is
+/// Σ strength.
 ///
 /// The arrays are borrowed when the graph is the caller's (the
 /// connectivities `pp.neighbors` stored, possibly a memory-mapped file), so
@@ -81,6 +85,35 @@ impl WeightedGraph<'static> {
         n: usize,
     ) -> Self {
         WeightedGraph::from_parts(Cow::Owned(indptr), Cow::Owned(adj), Cow::Owned(w), n)
+    }
+}
+
+impl WeightedGraph<'static> {
+    /// A reduced graph: no self-loops, strengths given (its members' sums).
+    fn from_csr_with_strength(
+        indptr: Vec<u32>,
+        adj: Vec<u32>,
+        w: Vec<f32>,
+        n: usize,
+        strength: Vec<f64>,
+    ) -> Self {
+        let n_undirected = (0..n)
+            .map(|i| {
+                (indptr[i] as usize..indptr[i + 1] as usize)
+                    .filter(|&t| adj[t] as usize >= i)
+                    .count()
+            })
+            .sum();
+        let two_m = strength.iter().sum();
+        WeightedGraph {
+            n,
+            indptr: Cow::Owned(indptr),
+            adj: Cow::Owned(adj),
+            w: Cow::Owned(w),
+            strength,
+            two_m,
+            n_undirected,
+        }
     }
 }
 
@@ -167,25 +200,10 @@ pub(crate) fn weighted_from_connectivities(graph: NeighborGraph) -> WeightedGrap
     WeightedGraph::from_symmetric_csr(graph.indptr, graph.indices, graph.data, n)
 }
 
-/// Community strengths for a membership vector, sized to the graph.
-fn strengths_for(wg: &WeightedGraph<'_>, membership: &[u32]) -> Vec<f64> {
-    strengths_sized(wg, membership, wg.n)
-}
-
-/// Community strengths for a membership vector, in a buffer of `cap`
-/// entries (local moving may hand out any community id below the cap).
-fn strengths_sized(wg: &WeightedGraph<'_>, membership: &[u32], cap: usize) -> Vec<f64> {
-    let mut k = vec![0.0_f64; cap];
-    for i in 0..wg.n {
-        k[membership[i] as usize] += wg.strength[i];
-    }
-    k
-}
-
 /// Compact a membership vector to contiguous ids in first-appearance order
 /// (deterministic). Returns the compacted labels and community count.
 /// Labels may exceed the vector length (aggregate base memberships carry
-/// phase-1 ids over a shrunken node set), so the remap is sized by the max
+/// ids over a shrunken node set), so the remap is sized by the max
 /// label, not the node count.
 fn compact(membership: &[u32]) -> (Vec<u32>, usize) {
     let max_lab = membership.iter().copied().max().map_or(0, |m| m as usize);
@@ -251,7 +269,7 @@ pub(crate) fn relabel_by_size(labels: &[u32]) -> (Vec<u32>, usize) {
 /// small and near-ties are everywhere.
 const MOVE_REL_TOL: f64 = 1e-10;
 
-/// Hard ceiling on moves per `local_move` call, as a multiple of the vertex
+/// Hard ceiling on moves per `fast_local_move` call, as a multiple of the vertex
 /// count. The relative tolerance above removes the *known* cause of
 /// non-termination; this guarantees termination regardless. Local moving is
 /// a heuristic — stopping it early yields a valid partition that the outer
@@ -260,373 +278,415 @@ const MOVE_REL_TOL: f64 = 1e-10;
 /// benchmark ladder; if it fires, something is wrong and the trace says so.
 const MAX_MOVES_PER_VERTEX: usize = 100;
 
-/// Fast local moving (Louvain phase 1), structured exactly like igraph's
-/// `leiden_fastmove_vertices`: a FIFO of unstable vertices seeded with all
-/// vertices in random order; a vertex that moves re-queues its stable
-/// neighbours outside the new community. Every vertex ALWAYS has an empty
-/// community as a candidate (diff = 0) — the escape hatch that keeps the
-/// dynamics from carving fragments (measured: without it, Q varied
-/// 0.918–0.960 across seeds on the 20k mixture where igraph is stable at
-/// 0.9599). The vertex is removed from its community before scoring, so the
-/// "stay" diff uses the community strength without it. Ties keep the
-/// earlier candidate (empty first, then communities in ascending id).
-/// Returns the number of moves; `membership` ids stay within
-/// `n_comms_cap` (compacted by the caller).
-fn local_move(
+/// Fast local moving (Traag et al. 2019, Algorithm A.2; the CWTS
+/// `FastLocalMovingAlgorithm`). The nodes are visited from a cyclic queue
+/// that starts as a random permutation of all nodes. A node is taken out of
+/// its cluster and moved to the candidate with the largest gain
+/// `w(i, C) − res · k_i · K_C`; the candidates are one empty cluster (gain
+/// 0, so a node can always leave) and the clusters of its neighbours, in the
+/// order its edges reach them. Its own cluster wins every tie, which with
+/// [`MOVE_REL_TOL`] also covers gains equal up to rounding. When a node
+/// moves, its neighbours outside the new cluster that were stable rejoin the
+/// queue. Self-loops carry no gain and are skipped.
+///
+/// `membership` ids must be below `wg.n` (singletons, or a compacted
+/// partition); the result may leave gaps, which the caller compacts.
+/// Returns the number of moves.
+fn fast_local_move(
     wg: &WeightedGraph<'_>,
     membership: &mut [u32],
-    n_comms_cap: usize,
-    comm_strength: &mut [f64],
-    resolution: f64,
+    res: f64,
     rng: &mut ChaCha8Rng,
 ) -> usize {
     let n = wg.n;
-    let res = resolution / wg.two_m; // igraph folds 1/2m into the resolution
-                                     // Scale the move threshold to the graph, not to an absolute constant:
-                                     // see MOVE_REL_TOL. `two_m` is 0 only for an edgeless graph, which the
-                                     // caller has already handled.
-    let move_eps = MOVE_REL_TOL * wg.two_m;
-    let max_moves = MAX_MOVES_PER_VERTEX.saturating_mul(n.max(1));
-    // A VecDeque, not a growing Vec: `in_queue` already prevents duplicates,
-    // so at most `n` vertices are pending at once, but a Vec that is only
-    // ever pushed to and indexed by a moving head never reclaims consumed
-    // entries — measured at 17.2 million entries (69 MB) for a 50-node
-    // graph. Popping from the front keeps this O(n).
-    let mut order: Vec<u32> = (0..n as u32).collect();
-    order.shuffle(rng);
-    let mut queue: VecDeque<u32> = order.into_iter().collect();
-    let mut in_queue = vec![true; n];
-    let mut w_to = vec![0.0_f64; n_comms_cap];
-    let mut touched: Vec<u32> = Vec::new();
-    let mut count = vec![0_u32; n_comms_cap];
-    for &c in membership.iter() {
-        count[c as usize] += 1;
+    if n <= 1 {
+        return 0;
     }
-    let mut empty: Vec<u32> = (0..n_comms_cap as u32)
+    let move_eps = MOVE_REL_TOL * wg.two_m;
+    let max_moves = MAX_MOVES_PER_VERTEX.saturating_mul(n);
+    let mut cluster_w = vec![0.0_f64; n];
+    let mut count = vec![0_u32; n];
+    for i in 0..n {
+        cluster_w[membership[i] as usize] += wg.strength[i];
+        count[membership[i] as usize] += 1;
+    }
+    // Empty clusters as a stack whose top is the smallest free id.
+    let mut unused: Vec<u32> = (0..n as u32)
+        .rev()
         .filter(|&c| count[c as usize] == 0)
         .collect();
-    let mut moves = 0_usize;
 
-    while let Some(i) = queue.pop_front() {
+    let mut order: Vec<u32> = (0..n as u32).collect();
+    order.shuffle(rng);
+    let mut stable = vec![false; n];
+    let mut n_unstable = n;
+    let mut w_to = vec![0.0_f64; n];
+    let mut candidates: Vec<u32> = Vec::new();
+    let mut moves = 0_usize;
+    let mut pos = 0_usize;
+
+    while n_unstable > 0 {
         if moves >= max_moves {
             if std::env::var_os("POLARISEQ_TRACE").is_some() {
                 eprintln!(
-                    "[leiden] local_move hit the move cap: n={n} moves={moves} \
-                     pending={} two_m={:.3e}",
-                    queue.len(),
+                    "[leiden] local moving hit the move cap: n={n} moves={moves} \
+                     pending={n_unstable} two_m={:.3e}",
                     wg.two_m
                 );
             }
             break;
         }
-        let i = i as usize;
-        in_queue[i] = false;
-        let (s, e) = wg.row(i);
+        let i = order[pos] as usize;
         let ki = wg.strength[i];
-        let a = membership[i] as usize;
+        let current = membership[i] as usize;
 
-        // Remove i from its community while scoring.
-        comm_strength[a] -= ki;
-        count[a] -= 1;
-        if count[a] == 0 {
-            empty.push(a as u32);
+        cluster_w[current] -= ki;
+        count[current] -= 1;
+        if count[current] == 0 {
+            unused.push(current as u32);
         }
 
+        candidates.clear();
+        candidates.push(*unused.last().expect("the node's removal leaves a free id"));
+        let (s, e) = wg.row(i);
         for t in s..e {
             let j = wg.adj[t] as usize;
             if j == i {
-                continue; // self-loops cancel in the move gain (igraph's u != v)
+                continue;
             }
             let c = membership[j];
             if w_to[c as usize] == 0.0 {
-                touched.push(c);
+                candidates.push(c);
             }
             w_to[c as usize] += f64::from(wg.w[t]);
         }
-        touched.sort_unstable();
 
-        // Candidates: the empty community (diff 0), then the touched
-        // communities in ascending id. Stay = own community without i.
-        let mut best = a;
-        let mut best_score = w_to[a] - res * ki * comm_strength[a];
-        if !empty.is_empty() && 0.0 > best_score + move_eps {
-            best = empty[empty.len() - 1] as usize;
-            best_score = 0.0;
-        }
-        for &c in &touched {
+        let mut best = current;
+        let mut best_gain = w_to[current] - res * ki * cluster_w[current];
+        for &c in &candidates {
             let c = c as usize;
-            let score = w_to[c] - res * ki * comm_strength[c];
-            if score > best_score + move_eps {
-                best_score = score;
+            let gain = w_to[c] - res * ki * cluster_w[c];
+            if gain > best_gain + move_eps {
                 best = c;
+                best_gain = gain;
             }
+            w_to[c] = 0.0;
         }
+        w_to[current] = 0.0;
 
-        // Put i back into its chosen community.
-        comm_strength[best] += ki;
+        cluster_w[best] += ki;
         count[best] += 1;
-        if best != a {
-            if !empty.is_empty() && empty[empty.len() - 1] as usize == best {
-                empty.pop();
-            }
+        if unused.last().is_some_and(|&u| u as usize == best) {
+            unused.pop();
+        }
+        stable[i] = true;
+        n_unstable -= 1;
+
+        if best != current {
             membership[i] = best as u32;
             moves += 1;
             for t in s..e {
                 let j = wg.adj[t] as usize;
-                if membership[j] != best as u32 && !in_queue[j] {
-                    in_queue[j] = true;
-                    queue.push_back(j as u32);
+                if stable[j] && membership[j] as usize != best {
+                    stable[j] = false;
+                    n_unstable += 1;
+                    order[(pos + n_unstable) % n] = j as u32;
                 }
             }
         }
-
-        for &c in &touched {
-            w_to[c as usize] = 0.0;
-        }
-        touched.clear();
+        pos = if pos + 1 < n { pos + 1 } else { 0 };
     }
     moves
 }
 
-/// Leiden refinement, structured like igraph's `leiden_merge_vertices`.
-/// Within each phase-1 community C, vertices start as singletons and are
-/// visited in seeded random order; a still-singleton vertex v may merge
-/// into a neighbouring refined sub-community S only if BOTH are well
-/// connected inside C:
+/// Refinement (Traag et al. 2019, Algorithm A.3, `MergeNodesSubset`; the CWTS
+/// `LocalMergingAlgorithm`), run inside every cluster of `clusters` at once.
+/// Each cluster C starts as singletons, visited in random order. A node v
+/// still in a singleton, and well connected to the rest of C
+/// (`w(v, C∖v) ≥ res · k_v · (K_C − k_v)`), may join a sub-cluster S of a
+/// neighbour in C that is itself well connected
+/// (`w(S, C∖S) ≥ res · K_S · (K_C − K_S)`), or stay alone (gain 0). Among
+/// the candidates with a non-negative gain Δ it picks one with probability
+/// proportional to `exp(Δ / θ)`. The exponents are shifted by the largest
+/// gain so they cannot overflow; this leaves the probabilities unchanged.
+/// Only nodes that are still alone move, so sub-clusters only grow and
+/// always stay connected.
 ///
-/// - v: `w(v, C∖v) ≥ γ k_v (K_C − k_v) / 2m`
-/// - S: `w(S, C∖S) ≥ γ K_S (K_C − K_S) / 2m` (tracked incrementally)
-///
-/// The target is drawn from a softmax over the non-negative move gains
-/// (`exp(Δ/θ)`, θ = 0.01 — igraph's default `beta`; if no gain is
-/// non-negative the vertex stays a singleton). Merging only into a
-/// neighbour's community keeps every refined community connected by
-/// construction.
+/// Returns the refined partition, compacted, and its size.
 fn refine(
     wg: &WeightedGraph<'_>,
-    phase1: &[u32],
-    n_p1: usize,
-    resolution: f64,
+    clusters: &[u32],
+    n_clusters: usize,
+    res: f64,
     rng: &mut ChaCha8Rng,
 ) -> (Vec<u32>, usize) {
     let n = wg.n;
-    let res = resolution / wg.two_m;
-    // Bucket nodes by phase-1 community (counting sort, deterministic).
-    let mut offsets = vec![0_u32; n_p1 + 1];
-    for &c in phase1 {
+    // Members of each cluster, in node order (counting sort).
+    let mut offsets = vec![0_usize; n_clusters + 1];
+    for &c in clusters {
         offsets[c as usize + 1] += 1;
     }
-    for c in 0..n_p1 {
+    for c in 0..n_clusters {
         offsets[c + 1] += offsets[c];
     }
-    let mut order: Vec<u32> = vec![0; n];
+    let mut members = vec![0_u32; n];
     let mut cursor = offsets.clone();
-    for (i, &c) in phase1.iter().enumerate() {
-        order[cursor[c as usize] as usize] = i as u32;
+    for (i, &c) in clusters.iter().enumerate() {
+        members[cursor[c as usize]] = i as u32;
         cursor[c as usize] += 1;
     }
 
-    let mut refined = vec![u32::MAX; n];
-    // Per refined community: strength, size, external weight w(S, C∖S),
-    // non-singleton flag. ids are assigned sequentially.
-    let mut k_ref: Vec<f64> = vec![0.0; n];
-    let mut size: Vec<u32> = vec![0; n];
-    let mut external: Vec<f64> = vec![0.0; n];
-    let mut non_singleton = vec![false; n];
-    let mut next_id = 0_u32;
-    let mut w_to = vec![0.0_f64; n];
-    let mut touched: Vec<u32> = Vec::new();
-
-    for c in 0..n_p1 {
-        let (s, e) = (offsets[c] as usize, offsets[c + 1] as usize);
-        // Singleton init: external of {v} = w(v, C∖v); K_C = Σ k_v.
-        let mut k_total = 0.0_f64;
-        for &v in &order[s..e] {
-            let vi = v as usize;
-            let id = next_id;
-            next_id += 1;
-            refined[vi] = id;
-            k_ref[id as usize] = wg.strength[vi];
-            size[id as usize] = 1;
-            let (vs, ve) = wg.row(vi);
-            let mut ext = 0.0_f64;
-            for t in vs..ve {
-                let u = wg.adj[t] as usize;
-                if u != vi && phase1[u] == c as u32 {
-                    ext += f64::from(wg.w[t]);
-                }
+    // Every node starts as its own sub-cluster, numbered by the node.
+    let mut refined: Vec<u32> = (0..n as u32).collect();
+    let mut sub_w: Vec<f64> = wg.strength.clone();
+    let mut external = vec![0.0_f64; n];
+    for i in 0..n {
+        let (s, e) = wg.row(i);
+        for t in s..e {
+            let j = wg.adj[t] as usize;
+            if j != i && clusters[j] == clusters[i] {
+                external[i] += f64::from(wg.w[t]);
             }
-            external[id as usize] = ext;
-            k_total += wg.strength[vi];
         }
-        let mut members: Vec<u32> = order[s..e].to_vec();
-        members.shuffle(rng);
-        for &v in &members {
-            let vi = v as usize;
-            let own = refined[vi];
-            if non_singleton[own as usize] {
-                continue; // only singletons merge
-            }
-            let kv = wg.strength[vi];
-            // v must be well connected to the rest of C.
-            if external[own as usize] < res * kv * (k_total - kv) {
+    }
+    let mut non_singleton = vec![false; n];
+    let mut w_to = vec![0.0_f64; n];
+    let mut candidates: Vec<u32> = Vec::new();
+    let mut gains: Vec<f64> = Vec::new();
+    let mut cumulative: Vec<f64> = Vec::new();
+
+    for c in 0..n_clusters {
+        let part = &members[offsets[c]..offsets[c + 1]];
+        if part.len() < 2 {
+            continue;
+        }
+        let k_total: f64 = part.iter().map(|&v| wg.strength[v as usize]).sum();
+        let mut visit = part.to_vec();
+        visit.shuffle(rng);
+        for &v in &visit {
+            let v = v as usize;
+            let kv = wg.strength[v];
+            if non_singleton[v] || external[v] < res * sub_w[v] * (k_total - sub_w[v]) {
                 continue;
             }
-            let (vs, ve) = wg.row(vi);
-            // Gains towards each neighbouring refined community in C.
-            touched.clear();
-            for t in vs..ve {
+            sub_w[v] = 0.0;
+            external[v] = 0.0;
+
+            candidates.clear();
+            candidates.push(v as u32);
+            let (s, e) = wg.row(v);
+            for t in s..e {
                 let u = wg.adj[t] as usize;
-                if u == vi || phase1[u] != c as u32 {
+                if u == v || clusters[u] as usize != c {
                     continue;
                 }
                 let r = refined[u];
                 if w_to[r as usize] == 0.0 {
-                    touched.push(r);
+                    candidates.push(r);
                 }
                 w_to[r as usize] += f64::from(wg.w[t]);
             }
-            // Softmax over non-negative gains of well-connected targets;
-            // shift by the max so exp cannot overflow (igraph relies on
-            // IEEE inf arithmetic; shifting is equivalent and portable).
-            let mut cands: Vec<(u32, f64)> = Vec::with_capacity(touched.len());
-            let mut dmax = f64::NEG_INFINITY;
-            for &r in &touched {
-                let ru = r as usize;
-                let gain = w_to[ru] - res * kv * k_ref[ru];
-                if gain >= 0.0 && external[ru] >= res * k_ref[ru] * (k_total - k_ref[ru]) {
-                    cands.push((r, gain));
-                    dmax = dmax.max(gain);
+
+            gains.clear();
+            let mut top = 0.0_f64; // staying alone always qualifies with gain 0
+            for &r in &candidates {
+                let r = r as usize;
+                let well_connected = external[r] >= res * sub_w[r] * (k_total - sub_w[r]);
+                let gain = w_to[r] - res * kv * sub_w[r];
+                if well_connected && gain >= 0.0 {
+                    gains.push(gain);
+                    top = top.max(gain);
+                } else {
+                    gains.push(f64::NAN);
                 }
-                w_to[ru] = 0.0;
+                w_to[r] = 0.0;
             }
-            if !cands.is_empty() {
-                let weights: Vec<f64> = cands
-                    .iter()
-                    .map(|&(_, g)| ((g - dmax) / THETA).exp())
-                    .collect();
-                let total: f64 = weights.iter().sum();
-                let mut pick = rng.random::<f64>() * total;
-                let mut chosen = cands[0].0;
-                for (&(r, _), &wt) in cands.iter().zip(&weights) {
-                    pick -= wt;
-                    if pick <= 0.0 {
-                        chosen = r;
-                        break;
-                    }
+            cumulative.clear();
+            let mut total = 0.0_f64;
+            for &g in &gains {
+                if !g.is_nan() {
+                    total += ((g - top) / THETA).exp();
                 }
-                // Merge v into `chosen`: edges to its members become
-                // internal, edges to the rest of C become external.
-                let cu = chosen as usize;
-                refined[vi] = chosen;
-                k_ref[cu] += kv;
-                size[cu] += 1;
-                non_singleton[cu] = true;
-                for t in vs..ve {
-                    let u = wg.adj[t] as usize;
-                    if u != vi && phase1[u] == c as u32 {
-                        if refined[u] == chosen {
-                            external[cu] -= f64::from(wg.w[t]);
-                        } else {
-                            external[cu] += f64::from(wg.w[t]);
-                        }
-                    }
+                cumulative.push(total);
+            }
+            let draw = rng.random::<f64>() * total;
+            let pick = cumulative
+                .partition_point(|&x| x < draw)
+                .min(candidates.len() - 1);
+            let chosen = candidates[pick] as usize;
+
+            sub_w[chosen] += kv;
+            for t in s..e {
+                let u = wg.adj[t] as usize;
+                if u == v || clusters[u] as usize != c {
+                    continue;
                 }
+                if refined[u] as usize == chosen {
+                    external[chosen] -= f64::from(wg.w[t]);
+                } else {
+                    external[chosen] += f64::from(wg.w[t]);
+                }
+            }
+            if chosen != v {
+                refined[v] = chosen as u32;
+                non_singleton[chosen] = true;
             }
         }
     }
-    // Renumber to contiguous ids (dead singleton ids may remain).
-    let (refined_c, n_ref) = compact(&refined);
-    (refined_c, n_ref)
+    compact(&refined)
 }
 
-/// Aggregate onto the refined partition: nodes = refined communities,
-/// weights summed between them, internal weight as a self-loop. Counting
-/// sort + per-row sort/merge of duplicates (parallel over rows, ordered).
-/// The phase-1 partition becomes the initial membership of the aggregate
-/// nodes. Returns the quotient graph and that initial membership.
-fn aggregate(
-    wg: &WeightedGraph<'_>,
-    refined: &[u32],
-    n_ref: usize,
-    phase1: &[u32],
-) -> (WeightedGraph<'static>, Vec<u32>) {
-    // Initial membership: any member's phase-1 label (they all agree).
-    let mut base = vec![u32::MAX; n_ref];
-    for (i, &r) in refined.iter().enumerate() {
-        if base[r as usize] == u32::MAX {
-            base[r as usize] = phase1[i];
-        }
-    }
-
-    // Counting-sort scatter of every directed entry into its refined row.
-    let mut indptr = vec![0_u32; n_ref + 1];
+/// The reduced (aggregate) graph of a partition: one node per part, the
+/// weight between two parts summed over the edges between them, and each
+/// node's strength the sum of its members' strengths. Edges inside a part
+/// are dropped (they carry no gain in local moving), so `two_m` is kept
+/// exactly and needs no self-loops. Counting-sort scatter of the edges
+/// between parts, then a sort and merge per row (parallel, deterministic).
+fn reduce(wg: &WeightedGraph<'_>, part: &[u32], n_parts: usize) -> WeightedGraph<'static> {
+    let mut strength = vec![0.0_f64; n_parts];
+    let mut indptr = vec![0_u32; n_parts + 1];
     for i in 0..wg.n {
+        let a = part[i] as usize;
+        strength[a] += wg.strength[i];
         let (s, e) = wg.row(i);
-        indptr[refined[i] as usize + 1] += (e - s) as u32;
+        indptr[a + 1] += (s..e)
+            .filter(|&t| part[wg.adj[t] as usize] as usize != a)
+            .count() as u32;
     }
-    for r in 0..n_ref {
+    for r in 0..n_parts {
         indptr[r + 1] += indptr[r];
     }
-    let nnz = indptr[n_ref] as usize;
+    let nnz = indptr[n_parts] as usize;
     let mut adj = vec![0_u32; nnz];
     let mut w = vec![0.0_f32; nnz];
     let mut cursor = indptr.clone();
     for i in 0..wg.n {
+        let a = part[i] as usize;
         let (s, e) = wg.row(i);
-        let a = refined[i] as usize;
         for t in s..e {
-            let pos = cursor[a] as usize;
-            adj[pos] = refined[wg.adj[t] as usize];
-            w[pos] = wg.w[t];
-            cursor[a] += 1;
+            let b = part[wg.adj[t] as usize];
+            if b as usize != a {
+                let p = cursor[a] as usize;
+                adj[p] = b;
+                w[p] = wg.w[t];
+                cursor[a] += 1;
+            }
         }
     }
-
-    // Sort + merge duplicates within each row (deterministic, f64 sums).
-    let rows: Vec<Vec<(u32, f32)>> = (0..n_ref)
+    let rows: Vec<Vec<(u32, f32)>> = (0..n_parts)
         .into_par_iter()
         .map(|r| {
             let (s, e) = (indptr[r] as usize, indptr[r + 1] as usize);
             let mut row: Vec<(u32, f32)> = (s..e).map(|t| (adj[t], w[t])).collect();
             row.sort_unstable_by_key(|&(c, _)| c);
-            let mut merged: Vec<(u32, f32)> = Vec::with_capacity(row.len());
-            for &(col, wt) in &row {
+            let mut merged: Vec<(u32, f64)> = Vec::with_capacity(row.len());
+            for &(col, x) in &row {
                 match merged.last_mut() {
-                    Some(last) if last.0 == col => {
-                        last.1 = (f64::from(last.1) + f64::from(wt)) as f32;
-                    }
-                    _ => merged.push((col, wt)),
+                    Some(last) if last.0 == col => last.1 += f64::from(x),
+                    _ => merged.push((col, f64::from(x))),
                 }
             }
-            merged
+            merged.into_iter().map(|(c, x)| (c, x as f32)).collect()
         })
         .collect();
-
-    let mut new_indptr = vec![0_u32; n_ref + 1];
+    let mut new_indptr = vec![0_u32; n_parts + 1];
     for (r, row) in rows.iter().enumerate() {
         new_indptr[r + 1] = new_indptr[r] + row.len() as u32;
     }
-    let mut new_adj = vec![0_u32; new_indptr[n_ref] as usize];
-    let mut new_w = vec![0.0_f32; new_indptr[n_ref] as usize];
-    for r in 0..n_ref {
-        let s = new_indptr[r] as usize;
-        for (t, &(col, wt)) in rows[r].iter().enumerate() {
-            new_adj[s + t] = col;
-            new_w[s + t] = wt;
+    let mut new_adj = Vec::with_capacity(new_indptr[n_parts] as usize);
+    let mut new_w = Vec::with_capacity(new_indptr[n_parts] as usize);
+    for row in rows {
+        for (c, x) in row {
+            new_adj.push(c);
+            new_w.push(x);
         }
     }
+    WeightedGraph::from_csr_with_strength(new_indptr, new_adj, new_w, n_parts, strength)
+}
 
-    (
-        WeightedGraph::from_symmetric_csr(new_indptr, new_adj, new_w, n_ref),
-        base,
-    )
+/// One Leiden iteration from the partition in `clusters` (Traag et al. 2019,
+/// Algorithm A.2; the CWTS `LeidenAlgorithm.improveClusteringOneIteration`):
+/// local moving; unless every node is alone, refine, reduce the graph onto
+/// the refined partition with each refined sub-cluster starting in its
+/// cluster, and continue on the reduced graph. When refinement merges
+/// nothing, the graph is reduced onto the clusters themselves, each starting
+/// alone. The reduced graph's partition is then carried back to the nodes.
+/// Returns whether local moving changed anything at any level.
+fn improve(
+    wg: &WeightedGraph<'_>,
+    clusters: &mut Vec<u32>,
+    n_clusters: &mut usize,
+    res: f64,
+    rng: &mut ChaCha8Rng,
+    level: usize,
+) -> bool {
+    let mut update = fast_local_move(wg, clusters, res, rng) > 0;
+    let (c, nc) = compact(clusters);
+    *clusters = c;
+    *n_clusters = nc;
+    if nc >= wg.n || level + 1 >= MAX_LEVELS {
+        return update;
+    }
+    let (refined, n_refined) = refine(wg, clusters, nc, res, rng);
+    let (reduced, mut sub, mapping) = if n_refined < wg.n {
+        let mut start = vec![0_u32; n_refined];
+        for (i, &r) in refined.iter().enumerate() {
+            start[r as usize] = clusters[i];
+        }
+        (reduce(wg, &refined, n_refined), start, refined)
+    } else {
+        let mapping = clusters.clone();
+        (reduce(wg, &mapping, nc), (0..nc as u32).collect(), mapping)
+    };
+    let mut sub_n = 0;
+    update |= improve(&reduced, &mut sub, &mut sub_n, res, rng, level + 1);
+    for (i, m) in mapping.iter().enumerate() {
+        clusters[i] = sub[*m as usize];
+    }
+    *n_clusters = sub_n;
+    update
+}
+
+/// Leiden: [`OUTER_ITERATIONS`] iterations of [`improve`], each continuing
+/// from the partition the previous one left, keeping the partition of
+/// highest modularity; stops early when an iteration changes nothing. Then
+/// [`coarsen_degenerate`]. Returns labels, community count, modularity.
+pub(crate) fn leiden_partition(
+    wg: &WeightedGraph<'_>,
+    resolution: f64,
+    seed: u64,
+) -> (Vec<u32>, usize, f64) {
+    if wg.two_m == 0.0 || wg.n == 0 {
+        return (vec![0_u32; wg.n], wg.n.min(1), 0.0);
+    }
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    let res = resolution / wg.two_m;
+    let mut clusters: Vec<u32> = (0..wg.n as u32).collect();
+    let mut n_clusters = wg.n;
+    let mut best: Option<(Vec<u32>, usize, f64)> = None;
+    for it in 0..OUTER_ITERATIONS {
+        let update = improve(wg, &mut clusters, &mut n_clusters, res, &mut rng, 0);
+        let q = modularity(wg, &clusters, resolution);
+        if std::env::var_os("POLARISEQ_TRACE").is_some() {
+            eprintln!("[leiden] iteration {it}: k={n_clusters} Q={q:.6}");
+        }
+        if best.as_ref().is_none_or(|b| q > b.2 + 1e-12) {
+            best = Some((clusters.clone(), n_clusters, q));
+        }
+        if !update {
+            break;
+        }
+    }
+    let (labels, n_comms, _q) = best.unwrap_or_else(|| (vec![0_u32; wg.n], 1, 0.0));
+    let (labels, n_comms) = coarsen_degenerate(wg, labels, n_comms, resolution);
+    let q = modularity(wg, &labels, resolution);
+    (labels, n_comms, q)
 }
 
 /// Modularity with resolution γ on the weighted graph, in the per-community
-/// form `Q = Σ_c [W_c/m − γ K_c²/(4m²)]` (algebraically identical to
-/// igraph's `(1/2m) Σ_ij [w_ij − γ k_i k_j / 2m] δ(c_i, c_j)`, which sums
-/// the degree term over *all* pairs within a community, not just edges).
+/// form `Q = Σ_c [W_c/m − γ K_c²/(4m²)]`, algebraically identical to the
+/// pair form `(1/2m) Σ_ij [w_ij − γ k_i k_j / 2m] δ(c_i, c_j)` (whose degree
+/// term runs over all pairs within a community, not only edges).
 /// `W_c` counts each internal undirected edge once and each self-loop once;
 /// `K_c` is the community strength.
 pub(crate) fn modularity(wg: &WeightedGraph<'_>, labels: &[u32], resolution: f64) -> f64 {
@@ -664,110 +724,6 @@ pub(crate) fn modularity(wg: &WeightedGraph<'_>, labels: &[u32], resolution: f64
     q
 }
 
-/// One full Leiden run over the levels, starting from `start` (or
-/// singletons). Returns the labels on the *original* graph nodes.
-/// Level structure per igraph: local moving; stop when the partition has
-/// one community per vertex; otherwise refine and aggregate — and when
-/// refinement merges nothing, aggregate on the phase-1 partition anyway
-/// (the pass that lets whole fragments merge on the quotient graph).
-fn run_levels(
-    wg: &WeightedGraph<'_>,
-    start: Option<Vec<u32>>,
-    resolution: f64,
-    rng: &mut ChaCha8Rng,
-) -> (Vec<u32>, usize) {
-    let n = wg.n;
-    // Borrow the input for the first level; own only the (smaller)
-    // aggregated graphs. A clone here doubled the largest allocation of the
-    // whole clustering: ~0.84 GB at 4M cells.
-    let mut graph: Cow<'_, WeightedGraph<'_>> = Cow::Borrowed(wg);
-    let mut membership: Vec<u32> = start.unwrap_or_else(|| (0..n as u32).collect());
-    let mut comm_strength = strengths_for(&graph, &membership);
-    let mut mapping: Vec<u32> = (0..n as u32).collect();
-    let mut n_comms;
-
-    for _level in 0..MAX_LEVELS {
-        local_move(
-            &graph,
-            &mut membership,
-            graph.n,
-            &mut comm_strength,
-            resolution,
-            rng,
-        );
-        let (m_c, nc) = compact(&membership);
-        membership = m_c;
-        n_comms = nc;
-
-        if n_comms >= graph.n {
-            break; // fully contracted: one community per vertex
-        }
-
-        let (refined_raw, n_ref) = refine(&graph, &membership, n_comms, resolution, rng);
-        let (refined, n_ref_eff) = if n_ref >= graph.n {
-            (membership.clone(), n_comms)
-        } else {
-            (refined_raw, n_ref)
-        };
-        if n_ref_eff == graph.n {
-            break; // nothing to aggregate
-        }
-
-        let (new_graph, init) = aggregate(&graph, &refined, n_ref_eff, &membership);
-        for m in &mut mapping {
-            *m = refined[*m as usize];
-        }
-        graph = Cow::Owned(new_graph);
-        let (init_c, _n_init) = compact(&init);
-        membership = init_c;
-        comm_strength = strengths_for(&graph, &membership);
-    }
-
-    let mut labels: Vec<u32> = mapping.iter().map(|&m| membership[m as usize]).collect();
-    let (labels_c, n_out) = compact(&labels);
-    labels = labels_c;
-    (labels, n_out)
-}
-
-/// Full Leiden: run the level procedure `MAX_OUTER_ITERATIONS` times
-/// (igraph's `n_iterations=2`), each run starting from the previous
-/// partition and keeping the best by modularity — then collapse
-/// modularity-degenerate micro-communities with [`coarsen_degenerate`].
-/// Returns labels, community count, modularity.
-pub(crate) fn leiden_partition(
-    wg: &WeightedGraph<'_>,
-    resolution: f64,
-    seed: u64,
-) -> (Vec<u32>, usize, f64) {
-    if wg.two_m == 0.0 || wg.n == 0 {
-        return (vec![0_u32; wg.n], wg.n.min(1), 0.0);
-    }
-    let mut rng = ChaCha8Rng::seed_from_u64(seed);
-    let mut best: Option<(Vec<u32>, usize, f64)> = None;
-    let mut start: Option<Vec<u32>> = None;
-    for it in 0..MAX_OUTER_ITERATIONS {
-        let (labels, n_comms) = run_levels(wg, start.clone(), resolution, &mut rng);
-        let q = modularity(wg, &labels, resolution);
-        if std::env::var_os("POLARISEQ_TRACE").is_some() {
-            eprintln!("[leiden] outer {it}: k={n_comms} Q={q:.6}");
-        }
-        let improved = best.as_ref().is_none_or(|b| q > b.2 + 1e-12);
-        if improved {
-            best = Some((labels.clone(), n_comms, q));
-        }
-        if let Some(s) = &start {
-            if *s == labels {
-                break; // fixed point; further iterations are no-ops
-            }
-        }
-        start = Some(labels);
-    }
-    let (labels, n_comms, _q) = best.unwrap_or_else(|| (vec![0_u32; wg.n], 1, 0.0));
-    let (labels, n_comms) = coarsen_degenerate(wg, labels, n_comms, resolution);
-    let q = modularity(wg, &labels, resolution);
-    (labels, n_comms, q)
-}
-
 /// Collapse modularity-degenerate communities. On real graphs the optimum
 /// is surrounded by a flat region: merging or keeping 100-1000-node
 /// fragments changes Q by ~1e-6 (measured on heart_100k: twelve sub-1000
@@ -775,8 +731,8 @@ pub(crate) fn leiden_partition(
 /// dynamics — which only make strictly-improving moves — strand them while
 /// igraph's trajectory happens to land on the coarse side. This pass
 /// greedily merges the best community pair while its closed-form gain
-/// `dQ = w(a,b)/m − γ K_a K_b / (2m²)` exceeds `−ε` (ε = 1e-4·|Q|), each
-/// merge costing at most ε of modularity. Deterministic; k is small, so
+/// `dQ = w(a,b)/m − γ K_a K_b / (2m²)` is positive (strictly improving
+/// merges only; see the note in the body). Deterministic; k is small, so
 /// the O(k³) scan is noise.
 fn coarsen_degenerate(
     wg: &WeightedGraph<'_>,
@@ -865,8 +821,10 @@ fn coarsen_degenerate(
     compact(&labels)
 }
 
-/// Multi-level Louvain on the same machinery (local moving + aggregation,
-/// no refinement) — the engine behind `fast_community`.
+/// Multi-level Louvain (Blondel et al. 2008) on the same machinery: local
+/// moving and reduction, no refinement. The engine behind `fast_community`.
+/// Stops when a level moves nothing, merges nothing, or moves fewer than
+/// `convergence_fraction` of its nodes.
 pub(crate) fn louvain_partition(
     wg: &WeightedGraph<'_>,
     resolution: f64,
@@ -879,20 +837,13 @@ pub(crate) fn louvain_partition(
         return vec![0_u32; n];
     }
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    let res = resolution / wg.two_m;
     let mut graph: Cow<'_, WeightedGraph<'_>> = Cow::Borrowed(wg);
     let mut membership: Vec<u32> = (0..n as u32).collect();
-    let mut comm_strength = strengths_for(&graph, &membership);
     let mut mapping: Vec<u32> = (0..n as u32).collect();
 
     for _level in 0..max_levels.max(1) {
-        let moves = local_move(
-            &graph,
-            &mut membership,
-            graph.n,
-            &mut comm_strength,
-            resolution,
-            &mut rng,
-        );
+        let moves = fast_local_move(&graph, &mut membership, res, &mut rng);
         let (m_c, n_comms) = compact(&membership);
         membership = m_c;
         if moves == 0
@@ -901,19 +852,12 @@ pub(crate) fn louvain_partition(
         {
             break;
         }
-        // Aggregate onto the partition itself: the initial membership of
-        // aggregate nodes is the partition.
-        let (new_graph, init) = aggregate(&graph, &membership, n_comms, &membership);
-        if new_graph.n == graph.n {
-            break; // nothing merged; next level would repeat
-        }
+        let reduced = reduce(&graph, &membership, n_comms);
         for m in &mut mapping {
             *m = membership[*m as usize];
         }
-        graph = Cow::Owned(new_graph);
-        let (init_c, _n_init) = compact(&init);
-        membership = init_c;
-        comm_strength = strengths_for(&graph, &membership);
+        graph = Cow::Owned(reduced);
+        membership = (0..n_comms as u32).collect();
     }
 
     mapping.iter().map(|&m| membership[m as usize]).collect()
@@ -974,7 +918,7 @@ mod tests {
     }
 
     #[test]
-    fn local_move_converges_on_a_symmetric_clique() {
+    fn fast_local_move_converges_on_a_symmetric_clique() {
         // A symmetric clique is the worst case for tie-breaking: every move
         // is an exact tie. Convergence must be near-linear, not quadratic,
         // and the safety cap must stay untouched.
@@ -988,14 +932,13 @@ mod tests {
         );
 
         let mut membership: Vec<u32> = (0..n as u32).collect();
-        let mut comm_strength = strengths_for(&wg, &membership);
         let mut rng = ChaCha8Rng::seed_from_u64(0);
-        let moves = local_move(&wg, &mut membership, n, &mut comm_strength, 1.0, &mut rng);
+        let moves = fast_local_move(&wg, &mut membership, 1.0 / wg.two_m, &mut rng);
 
         let cap = MAX_MOVES_PER_VERTEX * n;
         assert!(
             moves < cap,
-            "local_move hit its safety cap ({moves} >= {cap}) — it is \
+            "local moving hit its safety cap ({moves} >= {cap}) — it is \
              ping-ponging on rounding noise, not converging"
         );
         // Converging on a symmetric clique means collapsing to one
@@ -1189,5 +1132,72 @@ mod tests {
         assert_eq!(lab[0], lab[1]);
         assert_eq!(lab[1], lab[2]);
         assert_ne!(lab[2], lab[3]);
+    }
+
+    #[test]
+    fn reduce_keeps_strengths_and_two_m() {
+        let wg = two_cliques();
+        let part = vec![0_u32, 0, 0, 1, 1, 1];
+        let red = reduce(&wg, &part, 2);
+        assert!((red.two_m - wg.two_m).abs() < 1e-9);
+        assert!((red.strength[0] - 6.05).abs() < 1e-6, "{:?}", red.strength);
+        assert_eq!(&*red.adj, &[1, 0]);
+        assert!((red.w[0] - 0.05).abs() < 1e-7);
+    }
+
+    #[test]
+    fn refinement_stays_inside_clusters() {
+        let mut x = 0x9e37_79b9_u64;
+        let mut next = || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        let n = 120_usize;
+        let mut edges = Vec::new();
+        for i in 0..n {
+            for j in (i + 1)..n {
+                if next() % 5 == 0 {
+                    edges.push((i, j, 0.1 + (next() % 100) as f32 / 100.0));
+                }
+            }
+        }
+        let wg = wg_from_edges(n, &edges);
+        let clusters: Vec<u32> = (0..n as u32).map(|i| i % 4).collect();
+        let mut rng = ChaCha8Rng::seed_from_u64(1);
+        let (refined, n_ref) = refine(&wg, &clusters, 4, 1.0 / wg.two_m, &mut rng);
+        assert!(n_ref >= 4 && n_ref <= n);
+        let mut parent = vec![u32::MAX; n_ref];
+        for i in 0..n {
+            let r = refined[i] as usize;
+            assert!(
+                parent[r] == u32::MAX || parent[r] == clusters[i],
+                "sub-cluster spans clusters"
+            );
+            parent[r] = clusters[i];
+        }
+    }
+
+    #[test]
+    fn modularity_never_below_singletons_and_iterations_help() {
+        // On a graph with clear structure the partition must beat both the
+        // singleton and the one-community partitions.
+        let mut edges = Vec::new();
+        for c in 0..6 {
+            let base = c * 10;
+            for a in 0..10 {
+                for b in (a + 1)..10 {
+                    edges.push((base + a, base + b, 1.0));
+                }
+            }
+            edges.push((base, ((c + 1) % 6) * 10 + 5, 0.2));
+        }
+        let wg = wg_from_edges(60, &edges);
+        let (labels, k, q) = leiden_partition(&wg, 1.0, 5);
+        assert_eq!(k, 6, "labels {labels:?}");
+        let single = modularity(&wg, &(0..60).collect::<Vec<u32>>(), 1.0);
+        let one = modularity(&wg, &vec![0_u32; 60], 1.0);
+        assert!(q > single && q > one, "{q} vs {single}, {one}");
     }
 }

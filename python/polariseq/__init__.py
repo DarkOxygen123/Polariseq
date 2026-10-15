@@ -110,7 +110,7 @@ __all__ = [
     "triple",
 ]
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
 # The active budget: what Polariseq may use. Detected from the machine on
 # first use and overridable with `set_budget`. Detection is lazy so that
@@ -307,11 +307,20 @@ def plan(
         with_umap=with_umap,
         n_files=max(1, len(datasets)),
         densest_nnz_per_row=_densest_nnz_per_row(datasets),
+        network_project=_project_on_network(),
     )
     p.datasets = datasets
     if verbose:
         print(p.report())
     return p
+
+
+def _project_on_network() -> bool:
+    """Whether the current project folder is on a network file system."""
+    from polariseq.resources import is_network_filesystem
+
+    proj = _current_project()
+    return proj is not None and is_network_filesystem(str(proj.path))
 
 
 def _densest_nnz_per_row(datasets: list[dict[str, Any]]) -> int | None:
@@ -394,9 +403,22 @@ def _sparse_from_scipy(x: Any) -> SparseMatrix:
     )
 
 
+def _scipy_sparse(what: str) -> Any:
+    """``scipy.sparse``, which only the hand-over of results to other tools needs (the ``scipy`` extra)."""
+    try:
+        import scipy.sparse as sp
+    except ImportError:
+        raise ImportError(
+            f"{what} returns a SciPy sparse matrix, and SciPy is not installed. Polariseq's own analysis "
+            'does not need it; to hand results to other tools, install it: pip install scipy (or the extra, '
+            'pip install "polariseq[scipy] @ git+https://github.com/DarkOxygen123/Polariseq.git")'
+        ) from None
+    return sp
+
+
 def _sparse_to_scipy(m: SparseMatrix) -> Any:
     """Copy a :class:`SparseMatrix` out to a ``scipy.sparse.csr_matrix``."""
-    import scipy.sparse as sp
+    sp = _scipy_sparse("SparseMatrix.to_scipy()")
 
     data, indices, indptr = m.to_arrays()
     return sp.csr_matrix((data, indices.astype(np.int32), indptr.astype(np.int32)), shape=m.shape)
@@ -726,7 +748,7 @@ class LazyAnnData:
 
     def sample(self, n: int = 100, seed: int = 42):
         """Preview a random sample of cells as a scipy CSR matrix."""
-        import scipy.sparse as sp
+        sp = _scipy_sparse("sample()")
         if self.source_format != "h5ad":
             # No random access for 10x formats — materialize and slice.
             self._materialize()
@@ -1878,70 +1900,85 @@ class _Preprocessing:
         embedding = adata.obsm[use_rep]
         if n_pcs is not None:
             embedding = embedding[:, :n_pcs]
-        emb = np.ascontiguousarray(embedding, dtype=np.float32)
-        n_obs = emb.shape[0]
+        n_obs = embedding.shape[0]
+        # The embedding is read into memory when it fits beside NN-Descent's
+        # working memory, else in place (`_results.graph_inputs`).
+        from polariseq.planning import neighbors_working_bytes
 
-        # Auto-switch: exact for small data, NN-Descent for large.
-        use_approx = approximate if approximate is not None else (n_obs > 10_000)
+        k = max(1, n_neighbors - 1)
+        held = _held_bytes(adata)
+        (embedding,), emb_inputs, emb_cache = _results.graph_inputs(
+            [embedding], held, neighbors_working_bytes(n_obs, n_neighbors, budget().threads))
+        with emb_cache:   # removes a local copy of the embedding, if one was made, at the end
+            emb = np.ascontiguousarray(embedding, dtype=np.float32)
 
-        if metric not in ("euclidean", "cosine"):
-            raise ValueError(f"metric must be 'euclidean' or 'cosine', not {metric!r}")
+            # Auto-switch: exact for small data, NN-Descent for large.
+            use_approx = approximate if approximate is not None else (n_obs > 10_000)
 
-        if use_approx:
-            # 0 iterations = auto (max(5, log2 n)); NN-Descent stops early once
-            # fewer than 0.1% of neighbour entries change.
-            # n_neighbors counts the cell itself (scanpy's convention, and
-            # the exact path's), so the search asks for one fewer. Until
-            # 2026-09-20 this path returned one neighbour more than scanpy.
-            #
-            # NN-Descent searches in Euclidean distance. For cosine, the rows
-            # are scaled to unit length first — on unit vectors Euclidean
-            # order is cosine order — and the distances are converted back to
-            # the exact path's 1 - cos, since |a-b|^2 = 2 - 2cos. Until
-            # 2026-09-26 this path ignored `metric` and still recorded it.
-            search = emb
-            if metric == "cosine":
-                norms = np.linalg.norm(emb, axis=1, keepdims=True)
-                search = np.ascontiguousarray(emb / np.maximum(norms, 1e-12),
-                                              dtype=np.float32)
-            # The graph is written by the core into its result arrays
-            # (memory-mapped files in a project), reserved at k per cell.
-            k = max(1, n_neighbors - 1)
-            cap = n_obs * max(1, min(k, n_obs - 1))
-            d_ip = _results.new(adata, "neighbors", "distances_indptr", (n_obs + 1,), np.uint32)
-            d_ix = _results.new(adata, "neighbors", "distances_indices", (cap,), np.uint32)
-            d_dx = _results.new(adata, "neighbors", "distances_data", (cap,), np.float32)
-            nnz = nndescent_dense(search, k, 0, seed, out=(d_ip, d_ix, d_dx))["nnz"]
-            if metric == "cosine":
-                d_dx[:nnz] = (d_dx[:nnz].astype(np.float64) ** 2 / 2.0).astype(np.float32)
-            method = "nndescent"
-        else:
-            result = neighbors_dense(emb, n_neighbors, metric)
-            nnz = len(result["indices"])
-            d_ip = _results.new(adata, "neighbors", "distances_indptr", (n_obs + 1,), np.uint32)
-            d_ix = _results.new(adata, "neighbors", "distances_indices", (nnz,), np.uint32)
-            d_dx = _results.new(adata, "neighbors", "distances_data", (nnz,), np.float32)
-            d_ip[...], d_ix[...], d_dx[...] = result["indptr"], result["indices"], result["data"]
-            method = "exact"
-        d_ip, d_ix, d_dx = (_results.view(d_ip), _results.view(d_ix, nnz),
-                            _results.view(d_dx, nnz))
-        adata.obsp["distances"] = _csr_from_arrays(d_ip, d_ix, d_dx, n_obs)
+            if metric not in ("euclidean", "cosine"):
+                raise ValueError(f"metric must be 'euclidean' or 'cosine', not {metric!r}")
 
-        # scanpy parity: the symmetrised fuzzy connectivities (the graph
-        # UMAP and clustering share), counted then written by the core
-        # straight into their result arrays.
-        conn: dict[str, np.ndarray] = {}
+            if use_approx:
+                # 0 iterations = auto (max(5, log2 n)); NN-Descent stops early once
+                # fewer than 0.1% of neighbour entries change.
+                # n_neighbors counts the cell itself (scanpy's convention, and
+                # the exact path's), so the search asks for one fewer. Until
+                # 2026-09-20 this path returned one neighbour more than scanpy.
+                #
+                # NN-Descent searches in Euclidean distance. For cosine, the rows
+                # are scaled to unit length first — on unit vectors Euclidean
+                # order is cosine order — and the distances are converted back to
+                # the exact path's 1 - cos, since |a-b|^2 = 2 - 2cos. Until
+                # 2026-09-26 this path ignored `metric` and still recorded it.
+                search = emb
+                if metric == "cosine":
+                    norms = np.linalg.norm(emb, axis=1, keepdims=True)
+                    search = np.ascontiguousarray(emb / np.maximum(norms, 1e-12),
+                                                  dtype=np.float32)
+                # The graph is written by the core into its result arrays
+                # (memory-mapped files in a project), reserved at k per cell.
+                cap = n_obs * max(1, min(k, n_obs - 1))
+                d_ip = _results.new(adata, "neighbors", "distances_indptr", (n_obs + 1,), np.uint32)
+                d_ix = _results.new(adata, "neighbors", "distances_indices", (cap,), np.uint32)
+                d_dx = _results.new(adata, "neighbors", "distances_data", (cap,), np.float32)
+                nnz = nndescent_dense(search, k, 0, seed, out=(d_ip, d_ix, d_dx))["nnz"]
+                if metric == "cosine":
+                    d_dx[:nnz] = (d_dx[:nnz].astype(np.float64) ** 2 / 2.0).astype(np.float32)
+                method = "nndescent"
+            else:
+                result = neighbors_dense(emb, n_neighbors, metric)
+                nnz = len(result["indices"])
+                d_ip = _results.new(adata, "neighbors", "distances_indptr", (n_obs + 1,), np.uint32)
+                d_ix = _results.new(adata, "neighbors", "distances_indices", (nnz,), np.uint32)
+                d_dx = _results.new(adata, "neighbors", "distances_data", (nnz,), np.float32)
+                d_ip[...], d_ix[...], d_dx[...] = result["indptr"], result["indices"], result["data"]
+                method = "exact"
+            d_ip, d_ix, d_dx = (_results.view(d_ip), _results.view(d_ix, nnz),
+                                _results.view(d_dx, nnz))
+            adata.obsp["distances"] = _csr_from_arrays(d_ip, d_ix, d_dx, n_obs)
 
-        def alloc(n_rows: int, n_entries: int):
-            conn["indptr"] = _results.new(adata, "neighbors", "connectivities_indptr",
-                                          (n_rows + 1,), np.uint32)
-            conn["indices"] = _results.new(adata, "neighbors", "connectivities_indices",
-                                           (n_entries,), np.uint32)
-            conn["data"] = _results.new(adata, "neighbors", "connectivities_data",
-                                        (n_entries,), np.float32)
-            return conn["indptr"], conn["indices"], conn["data"]
+            # scanpy parity: the symmetrised fuzzy connectivities (the graph
+            # UMAP and clustering share), counted then written by the core
+            # straight into their result arrays.
+            conn: dict[str, np.ndarray] = {}
 
-        fuzzy_connectivities_into(_as_u32(d_ip), _as_u32(d_ix), d_dx, n_obs, alloc)
+            def alloc(n_rows: int, n_entries: int):
+                conn["indptr"] = _results.new(adata, "neighbors", "connectivities_indptr",
+                                              (n_rows + 1,), np.uint32)
+                conn["indices"] = _results.new(adata, "neighbors", "connectivities_indices",
+                                               (n_entries,), np.uint32)
+                conn["data"] = _results.new(adata, "neighbors", "connectivities_data",
+                                            (n_entries,), np.float32)
+                return conn["indptr"], conn["indices"], conn["data"]
+
+            emb = search = embedding = None  # the embedding (or its copy) is not needed further
+        # The distance graph, read in random order for the symmetric union:
+        # into memory when it fits, else in place.
+        (f_ip, f_ix, f_dx), dist_inputs, dist_cache = _results.graph_inputs(
+            [d_ip, d_ix, d_dx], held, 0)
+        with dist_cache:
+            fuzzy_connectivities_into(_as_u32(f_ip), _as_u32(f_ix), f_dx, n_obs, alloc)
+        del f_ip, f_ix, f_dx
         adata.obsp["connectivities"] = _csr_from_arrays(
             _results.view(conn["indptr"]), _results.view(conn["indices"]),
             _results.view(conn["data"]), n_obs
@@ -1952,6 +1989,7 @@ class _Preprocessing:
             "use_rep": use_rep,
             "method": method,
             "connectivities": True,
+            "inputs": {"embedding": emb_inputs, "distances": dist_inputs},
         }
 
     def harmony_integrate(
@@ -2096,12 +2134,12 @@ def merge_datasets(
     batch_key: str = "dataset",
     seed: int = 42,
 ) -> AnnData:
-    """Process multiple .h5ad datasets independently, merge PCA embeddings.
+    """Deprecated: use ``ps.read_h5ad([...])`` and ``ps.pp.harmony_integrate(adata, 'dataset')``.
 
-    This is the memory-efficient multi-study workflow: each dataset is loaded,
-    preprocessed (normalize → log1p → HVG → PCA) one at a time, then ONLY the
-    PCA embeddings are concatenated. Memory usage is bounded by the largest
-    single dataset, not the combined total.
+    Each dataset is preprocessed (normalize, log1p, HVG, PCA) on its own and the
+    PCA embeddings are concatenated. Each file gets its own PCA, so the joined
+    embeddings lie in different bases and are not comparable across datasets.
+    Kept so that existing scripts run; it warns when called.
 
     Args:
         paths: Dataset paths — any mix of .h5ad, 10x .h5, and MatrixMarket
@@ -2447,13 +2485,16 @@ class _Tools:
         Three annotation methods:
         - ``'panglaodb'`` (default): Score against PanglaoDB markers
           (178 cell types, 30 organs, human + mouse)
-        - ``'markers'``: Score against our curated markers (~50 types)
+        - ``'markers'``: Score against our curated markers (43 types)
         - ``'celltypist'``: ML-based via CellTypist (requires `pip install celltypist`)
 
         Args:
             adata: The data container.
             groupby: Column in obs identifying clusters.
-            tissue: Restrict to specific tissue/organ markers.
+            tissue: Restrict to one tissue's markers: ``'immune'`` (or ``'pbmc'``, ``'blood'``),
+                ``'brain'``, ``'heart'``, ``'lung'``, ``'kidney'``, ``'pancreas'``, ``'liver'``,
+                ``'skin'``, ``'gut'``, ``'reproductive'``, or with ``'panglaodb'`` any PanglaoDB
+                organ name (``'Thymus'``, ``'Eye'``, ...). An unknown tissue is an error.
             species: "human" or "mouse" (used by PanglaoDB).
             method: Annotation method ('panglaodb', 'markers', or 'celltypist').
         """
@@ -2475,7 +2516,15 @@ class _Tools:
                 "liver": "Liver", "skin": "Skin", "gut": "GI tract",
                 "intestine": "GI tract", "reproductive": "Reproductive",
             }
-            organ = organ_map.get(tissue.lower() if tissue else "")
+            organ = None
+            if tissue:
+                from polariseq.panglaodb import PANGLAODB
+                by_name = {o.lower(): o for o in PANGLAODB if o != "NA"}
+                organ = organ_map.get(tissue.lower()) or by_name.get(tissue.lower())
+                if organ is None:
+                    raise ValueError(
+                        f"unknown tissue {tissue!r} for method='panglaodb'; use one of "
+                        f"{sorted(organ_map)} or a PanglaoDB organ: {sorted(by_name.values())}")
             markers = get_panglaodb_markers(organ=organ, species=species)
         else:
             from polariseq.markers import get_all_markers, get_tissue_markers
@@ -2869,7 +2918,27 @@ class _Tools:
         graph = adata.obsp["connectivities" if use_conn else "distances"]
         if use_conn and hasattr(graph, "has_sorted_indices") and not graph.has_sorted_indices:
             graph.sort_indices()  # the core expects rows sorted by column
+        # The graph is read into memory when it fits beside the layout's
+        # working memory, else in place (`_results.graph_inputs`); the layout itself is built in memory (its
+        # SGD writes cells in random order) and written to its file at the end.
+        from polariseq.planning import umap_working_bytes
+
+        (g_ip, g_ix, g_d), inputs, cache = _results.graph_inputs(
+            [graph.indptr, graph.indices, graph.data], _held_bytes(adata),
+            umap_working_bytes(int(graph.nnz), adata.n_obs))
         out = _results.new(adata, "umap", "X_umap", (adata.n_obs, 2), np.float32)
+        layout = np.zeros(out.shape, np.float32) if isinstance(out, np.memmap) else out
+        with cache:
+            self._umap_layout(adata, layout, g_ip, g_ix, g_d, use_conn, init, init_smooth,
+                              min_dist, spread, n_epochs, seed, deterministic)
+        if layout is not out:
+            out[...] = layout
+        adata.obsm["X_umap"] = _results.view(out)
+        adata.uns["umap"] = {"min_dist": min_dist, "spread": spread, "inputs": inputs}
+
+    def _umap_layout(self, adata, out, g_ip, g_ix, g_d, use_conn, init, init_smooth,
+                     min_dist, spread, n_epochs, seed, deterministic) -> None:
+        """The start and the SGD of :meth:`umap`, into ``out``."""
         mode = init if isinstance(init, str) else "given"
         if isinstance(init, str) and init in ("pca", "kmeans"):
             if "X_pca" not in adata.obsm:
@@ -2879,13 +2948,14 @@ class _Tools:
             else:
                 pcs = np.ascontiguousarray(adata.obsm["X_pca"], dtype=np.float32)
                 start = np.asarray(umap_kmeans_start(pcs, 1000, int(seed)), dtype=np.float64)
+                del pcs
             mode = "given"
         elif isinstance(init, str) and init in ("multilevel", "leiden"):
             if use_conn:
-                c_ip, c_ix, c_d = _as_u32(graph.indptr), _as_u32(graph.indices), np.asarray(graph.data, np.float32)
+                c_ip, c_ix, c_d = _as_u32(g_ip), _as_u32(g_ix), np.asarray(g_d, np.float32)
             else:
-                fz = fuzzy_connectivities(_as_u32(graph.indptr), _as_u32(graph.indices),
-                                          np.asarray(graph.data, dtype=np.float32), adata.n_obs)
+                fz = fuzzy_connectivities(_as_u32(g_ip), _as_u32(g_ix),
+                                          np.asarray(g_d, dtype=np.float32), adata.n_obs)
                 c_ip, c_ix, c_d = fz["indptr"], fz["indices"], fz["data"]
             if init == "leiden":
                 if "leiden" not in adata.obs:
@@ -2901,6 +2971,7 @@ class _Tools:
                 n_want = int(min(1000, max(50, adata.n_obs // 20)))
                 labels = np.asarray(umap_kmeans_labels(pcs, n_want, int(seed)), dtype=np.uint32)
                 n_groups = int(labels.max()) + 1
+                del pcs
             start = np.asarray(umap_multilevel_layout(c_ip, c_ix, c_d, adata.n_obs, labels, n_groups,
                                                       int(init_smooth)), dtype=np.float64)
             mode = "given"
@@ -2915,9 +2986,9 @@ class _Tools:
             lo, hi = start.min(axis=0), start.max(axis=0)
             out[:] = 10.0 * (start - lo) / np.where(hi > lo, hi - lo, 1.0)
         umap_embed(
-            _as_u32(graph.indptr),
-            _as_u32(graph.indices),
-            np.asarray(graph.data, dtype=np.float32),
+            _as_u32(g_ip),
+            _as_u32(g_ix),
+            np.asarray(g_d, dtype=np.float32),
             adata.n_obs,
             min_dist,
             spread,
@@ -2928,8 +2999,6 @@ class _Tools:
             out=out,
             init=mode,
         )
-        adata.obsm["X_umap"] = _results.view(out)
-        adata.uns["umap"] = {"min_dist": min_dist, "spread": spread}
 
     def leiden(
         self,
@@ -2943,8 +3012,8 @@ class _Tools:
         """Run community detection on the neighbor graph.
 
         Algorithms:
-        - ``'leiden'``: full Leiden (Traag et al. 2019), igraph-class quality,
-          deterministic per seed
+        - ``'leiden'``: full Leiden (Traag et al. 2019), the algorithm of the
+          authors' CWTS implementation, deterministic per seed
         - ``'fast'``: multi-level Louvain on the same engine (opt-in)
         - ``'igraph'``: igraph's C Leiden on the same weighted graph
           (requires the optional python-igraph package); the reference
@@ -2968,9 +3037,15 @@ class _Tools:
             conn = adata.obsp["connectivities"]
             if hasattr(conn, "has_sorted_indices") and not conn.has_sorted_indices:
                 conn.sort_indices()  # in place; the core expects sorted rows
-            c_indptr = _as_u32(conn.indptr)
-            c_indices = _as_u32(conn.indices)
-            c_data = np.asarray(conn.data, dtype=np.float32)
+            # Read into memory when it fits beside Leiden's working memory,
+            # else in place (`_results.graph_inputs`).
+            from polariseq.planning import leiden_working_bytes
+
+            (c_indptr, c_indices, c_data), inputs, cache = _results.graph_inputs(
+                [conn.indptr, conn.indices, conn.data], _held_bytes(adata),
+                leiden_working_bytes(int(conn.nnz)))
+            c_indptr, c_indices = _as_u32(c_indptr), _as_u32(c_indices)
+            c_data = np.asarray(c_data, dtype=np.float32)
         else:
             dist = adata.obsp["distances"]
             conn = fuzzy_connectivities(_as_u32(dist.indptr), _as_u32(dist.indices),
@@ -2978,6 +3053,7 @@ class _Tools:
             c_indptr = conn["indptr"]
             c_indices = conn["indices"]
             c_data = conn["data"]
+            inputs, cache = "memory", contextlib.nullcontext()
 
         if method == "igraph":
             # Optional backend delegating to the C igraph library (requires
@@ -3025,9 +3101,9 @@ class _Tools:
             }
             return
 
-        # The Rust Leiden is igraph-class at every scale we can measure, so
-        # 'auto' is always Leiden; 'fast' (multi-level Louvain, same engine)
-        # stays available as an explicit opt-in.
+        # 'auto' is always Leiden (its modularity matches or exceeds
+        # igraph's on every dataset measured; reproduce branch, benchmarks/relicence); 'fast'
+        # (multi-level Louvain, same engine) stays available as an opt-in.
         use_fast = method == "fast"
 
         # c_indptr/c_indices/c_data: the fuzzy connectivity graph. An earlier
@@ -3039,12 +3115,13 @@ class _Tools:
         # the unsymmetrised distance weights for minutes where the
         # connectivity graph clusters in ~2 s (found while running the
         # telemetry ladder; chapter 09).
-        if use_fast:
-            result = fast_community(c_indptr, c_indices, c_data, adata.n_obs, resolution, seed)
-            algo = "fast_label_propagation"
-        else:
-            result = leiden_cluster(c_indptr, c_indices, c_data, adata.n_obs, resolution, seed)
-            algo = "leiden"
+        with cache:
+            if use_fast:
+                result = fast_community(c_indptr, c_indices, c_data, adata.n_obs, resolution, seed)
+                algo = "fast_label_propagation"
+            else:
+                result = leiden_cluster(c_indptr, c_indices, c_data, adata.n_obs, resolution, seed)
+                algo = "leiden"
 
         adata.obs[key_added] = result["labels"].astype(np.int32)
         adata.uns["leiden"] = {
@@ -3055,6 +3132,7 @@ class _Tools:
             "n_edges": int(result["n_edges"]),
             "total_weight": float(result["total_weight"]),
             "params": {"seed": seed, "key_added": key_added},
+            "inputs": inputs,
         }
 
 
@@ -3169,9 +3247,10 @@ def integrate_datasets(
     harmony_clusters: int = 30,
     seed: int = 42,
 ) -> dict:
-    """Stream multiple datasets, integrate with batch correction — low memory.
+    """Deprecated: use ``ps.read_h5ad([...])``, ``ps.pp.pca`` and ``ps.pp.harmony_integrate(adata, 'dataset')``.
 
-    The full pipeline without loading full expression matrices:
+    Kept so that existing scripts run; it warns when called. It streams several datasets without
+    loading their matrices:
     1. Scan metadata (instant) → find shared genes across datasets
     2. Streaming HVG across all datasets (chunked reads)
     3. Reference-based PCA (subsample from all, then project each chunk)
@@ -3353,6 +3432,16 @@ def _read_h5ad_names(path: str, keys: tuple[str, ...] = ("obs", "var")) -> dict[
     try:
         import h5py
     except ImportError:
+        # h5py is not a dependency: the core's own reader gives the same names (gene names alone
+        # when no cell names are asked for).
+        try:
+            meta = scan_h5ad(str(path)) if "obs" in keys else scan_h5ad_genes(str(path))
+            for key in keys:
+                names = meta.get(f"{key}_names")
+                if names:
+                    out[key] = np.asarray(names, dtype=str)
+        except (OSError, RuntimeError, ValueError):
+            pass
         return out
     try:
         with h5py.File(path, "r") as f:
@@ -3946,6 +4035,19 @@ def _subset_prefix(adata: Any, dm: DiskMatrix) -> str:
     return str(proj.run_dir(name) / "latents" / f"pca_genes_{genes[:12]}" / "counts")
 
 
+def _held_bytes(adata) -> int:
+    """What a run holds in memory besides a graph step's inputs, as the plan
+    counts it: the matrix when it is in memory, and the process itself."""
+    from polariseq.planning import PROCESS_OVERHEAD_BYTES, _csr_bytes
+
+    x = getattr(adata, "_X", None)
+    if isinstance(x, SparseMatrix):
+        return _csr_bytes(int(x.nnz), int(x.shape[0])) + PROCESS_OVERHEAD_BYTES
+    if isinstance(x, np.ndarray) and _results.mapping(x) is None:
+        return int(x.nbytes) + PROCESS_OVERHEAD_BYTES
+    return PROCESS_OVERHEAD_BYTES
+
+
 def _as_u32(a) -> np.ndarray:
     """``a`` as uint32 without a copy where possible: SciPy stores indices
     as int32, whose non-negative values have the same bits as uint32."""
@@ -3982,12 +4084,31 @@ def _csr_from_arrays(indptr, indices, data, n_obs):
             ip, ix = indptr.astype(np.int64), np.asarray(indices).astype(np.int64)
         return sp.csr_matrix((np.asarray(data), ix, ip), shape=(n_obs, n_obs), copy=False)
     except ImportError:
-        # No scipy: return a lightweight namedtuple-like.
-        from types import SimpleNamespace
+        # No SciPy (it is the optional `scipy` extra): the graph's CSR arrays, as the core wrote them.
+        return _CSRGraph(np.asarray(indptr), np.asarray(indices), np.asarray(data), (n_obs, n_obs))
 
-        return SimpleNamespace(
-            indptr=np.asarray(indptr),
-            indices=np.asarray(indices),
-            data=np.asarray(data),
-            shape=(n_obs, n_obs),
-        )
+
+class _CSRGraph:
+    """A neighbour graph as CSR arrays, stored in ``obsp`` when SciPy is not installed.
+
+    Carries what Polariseq's own steps read (``indptr``, ``indices``, ``data``, ``shape``, ``nnz``). The
+    core writes every row sorted by column with no duplicates, which the two flags record.
+    ``to_scipy()`` converts it once SciPy is installed.
+    """
+
+    has_sorted_indices = True
+    has_canonical_format = True
+
+    def __init__(self, indptr, indices, data, shape):
+        self.indptr, self.indices, self.data, self.shape = indptr, indices, data, shape
+
+    @property
+    def nnz(self) -> int:
+        return int(self.indptr[-1]) if self.indptr.size else 0
+
+    def to_scipy(self) -> Any:
+        sp = _scipy_sparse("to_scipy()")
+        return sp.csr_matrix((self.data, self.indices, self.indptr), shape=self.shape)
+
+    def __repr__(self) -> str:
+        return f"<{self.shape[0]} x {self.shape[1]} neighbour graph, {self.nnz} entries (CSR arrays)>"

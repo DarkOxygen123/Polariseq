@@ -10,8 +10,9 @@ from __future__ import annotations
 import numpy as np
 import polariseq as ps
 import pytest
-import scipy.sparse as sp
 from polariseq import SparseMatrix
+
+sp = pytest.importorskip("scipy.sparse")
 
 FIXTURE_SMALL = "tests/data/sparse_100x200.h5ad"
 FIXTURE_10K = "tests/data/medium_10kx2k.h5ad"
