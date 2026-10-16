@@ -93,19 +93,30 @@ def compare_conditions(adata: Any, condition_key: str, reference: str, *,
                        conditions: list[str] | None = None, groups: list[str] | None = None,
                        min_cells: int = 10, key_added: str = "compare_conditions",
                        prior_count: float = 3.0) -> pd.DataFrame:
+    from polariseq import _checks
     from polariseq._polariseq import compare_cells, compare_pseudobulk
 
+    what = "compare_conditions"
+    _checks.groups_column(adata, condition_key, what=what, arg="condition_key")
+    if sample_key is not None:
+        _checks.groups_column(adata, sample_key, what=what, arg="sample_key")
+    if groupby is not None:
+        _checks.groups_column(adata, groupby, what=what)
     n = adata.n_obs
     cond = categorical(adata.obs[condition_key])
-    if reference not in list(cond.categories):
-        raise KeyError(f"{reference!r} is not a value of obs[{condition_key!r}]: "
-                       f"{list(cond.categories)}")
+    _checks.values_in([reference], cond.categories, what=f"{what} reference",
+                      column=f"obs[{condition_key!r}]")
+    if conditions is not None:
+        _checks.values_in(conditions, cond.categories, what=f"{what} conditions",
+                          column=f"obs[{condition_key!r}]")
     grp = (categorical(adata.obs[groupby]) if groupby is not None
            else pd.Categorical.from_codes(np.zeros(n, dtype=np.int8), categories=["all cells"]))
     keep = np.ones(n, dtype=bool)
     if conditions is not None:
         keep &= np.isin(np.asarray(cond, dtype=object), [reference, *conditions])
     if groups is not None:
+        _checks.values_in(groups, grp.categories, what=f"{what} groups",
+                          column=f"obs[{groupby!r}]" if groupby else "the cells")
         keep &= np.isin(np.asarray(grp, dtype=object), list(groups))
     ref = list(cond.categories).index(reference)
     name = groupby or "group"
@@ -165,9 +176,12 @@ def compare_conditions(adata: Any, condition_key: str, reference: str, *,
 
 def pseudobulk(adata: Any, sample_key: str, *, groupby: str | None = None,
                condition_key: str | None = None, min_cells: int = 0) -> Any:
-    from polariseq import AnnData, _results
+    from polariseq import AnnData, _checks, _results
     from polariseq._polariseq import pseudobulk_sums
 
+    for arg, k in (("sample_key", sample_key), ("groupby", groupby), ("condition_key", condition_key)):
+        if k is not None:
+            _checks.groups_column(adata, k, what="pseudobulk", arg=arg)
     keys = [k for k in (groupby, condition_key, sample_key) if k is not None]
     cats = [categorical(adata.obs[k]) for k in keys]
     unit, parts = _units(cats, np.ones(adata.n_obs, dtype=bool))

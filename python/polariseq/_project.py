@@ -23,6 +23,8 @@ Layout:
         results/      per-cell results of steps (e.g. doublet scores), written
                       by the Rust core and read as memory-mapped views
       scratch/        temporary files of a running step
+      states/<name>/  analyses saved with adata.save(name), opened with
+                      ps.load (results linked, counts pointed to)
 """
 from __future__ import annotations
 
@@ -44,8 +46,10 @@ for the analyses of this project is kept in this folder.
 | `runs/<name>/` | one folder per dataset analyzed, named after its file | See below |
 | `runs/<name>/matrix/` | on-disk copy of the counts, read in blocks by an out-of-core analysis (large) | Yes, when no analysis is running; it is made again from the original file |
 | `runs/<name>/latents/` | intermediate arrays (e.g. the gene-subset copy PCA reads) | Yes, when no analysis is running; the steps that made them run again |
+| `runs/<name>/analyses/<analysis>/` | the results of a named analysis of that dataset (`from_counts`) | Yes, when no analysis is using them |
 | `runs/<name>/results/` | per-cell results of steps (e.g. doublet scores), read as memory-mapped views | Yes, when no analysis is using them; the steps that made them run again |
 | `scratch/` | temporary files of a running step | Yes, when no Polariseq process is running |
+| `states/<name>/` | an analysis saved with `adata.save("<name>")`, opened with `ps.load` | Yes, to delete that saved analysis |
 
 Your original data files are never written or moved.
 
@@ -80,8 +84,24 @@ class Project:
         return self.path / "scratch"
 
     def run_dir(self, name: str) -> Path:
-        """The folder of the dataset analyzed under ``name``."""
+        """The folder of the dataset analyzed under ``name``.
+
+        Args:
+            name: The dataset's folder name (``adata.name``).
+        """
         return self.path / "runs" / name
+
+    def results_dir(self, name: str, analysis: str | None = None) -> Path:
+        """Where the steps of an analysis of the dataset ``name`` keep their
+        results: the dataset's ``results/``, or for a named analysis
+        (``from_counts``) ``analyses/<analysis>/results/``.
+
+        Args:
+            name: The dataset's folder name (``adata.name``).
+            analysis: A named analysis (``adata.analysis``), or ``None``.
+        """
+        run = self.run_dir(name)
+        return run / "results" if analysis is None else run / "analyses" / analysis / "results"
 
     def status(self) -> dict[str, int]:
         """Bytes used by each part of the project, per dataset."""
@@ -89,19 +109,35 @@ class Project:
             return sum(f.stat().st_size for f in p.rglob("*") if f.is_file()) if p.exists() else 0
 
         out = {"scratch": size(self.scratch)}
+        # A saved analysis links the results it keeps: those bytes are counted
+        # under runs/ too, while the step's own file remains.
+        for state in sorted((self.path / "states").glob("[!.]*")):
+            out[f"states/{state.name}"] = size(state)
         for run in sorted((self.path / "runs").glob("*")):
             for part in ("matrix", "latents", "results"):
                 out[f"runs/{run.name}/{part}"] = size(run / part)
+            for a in sorted((run / "analyses").glob("*")):
+                out[f"runs/{run.name}/analyses/{a.name}"] = size(a)
         return out
 
     def clean(self, part: str = "scratch") -> int:
         """Delete ``scratch``, or the ``latents``, ``results`` or ``matrix``
         of every dataset. Returns the bytes freed. Run it only when no analysis
-        of this project is running."""
+        of this project is running.
+
+        Args:
+            part: ``'scratch'``, ``'latents'``, ``'results'`` (named analyses' results too) or
+                ``'matrix'``.
+
+        Returns:
+            The bytes freed.
+        """
         if part not in ("scratch", "latents", "results", "matrix"):
             raise ValueError("part must be 'scratch', 'latents', 'results' or 'matrix'")
         targets = ([self.scratch] if part == "scratch"
                    else [r / part for r in (self.path / "runs").glob("*")])
+        if part == "results":  # the named analyses' results too
+            targets += [a / "results" for a in (self.path / "runs").glob("*/analyses/*")]
         freed = 0
         for t in targets:
             if t.exists():
@@ -122,6 +158,12 @@ def project(path: str | Path) -> Project:
     on-disk copies an out-of-core analysis reads, the intermediates, and the
     scratch files of running steps (the spill folder of
     ``ps.process_diskbacked`` included).
+
+    Args:
+        path: The folder (created if missing); `~` is expanded.
+
+    Returns:
+        The :class:`Project`, now the session's project folder.
     """
     global _CURRENT
     from polariseq import set_budget

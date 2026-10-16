@@ -241,7 +241,7 @@ in [`examples/04_plotting.py`](examples/04_plotting.py).
 
 ## Examples
 
-The [`examples/`](examples) folder holds runnable scripts. Each starts with a
+The [`examples/`](examples) folder holds runnable scripts; [`notebooks/02_every_command.ipynb`](notebooks/02_every_command.ipynb) runs every command once, and [`docs/API.md`](docs/API.md) lists every function with its arguments, their types and defaults. Each starts with a
 short block of settings (input, output folder, memory, threads): set your
 paths there and run it.
 
@@ -253,6 +253,7 @@ paths there and run it.
 | `04_plotting.py` | every plot type and multi-panel figures |
 | `05_comparing_conditions.py` | two conditions: doublets, integration and a per-cell-type comparison with donors as replicates |
 | `06_large_run.py` | one large dataset (one or many `.h5ad` files) end to end: run report, figures and a per-cell table |
+| `07_settings_saving_exporting.py` | several analyses with different settings, how far they agree, saving, reopening and exporting |
 
 ```bash
 git clone https://github.com/DarkOxygen123/Polariseq.git polariseq
@@ -276,7 +277,9 @@ python examples/01_quickstart.py
 | biology | marker genes, gene scores, cluster annotation, merging and sub-clustering, PAGA, pseudotime |
 | conditions | pseudobulk differential expression with donors as replicates (`ps.tl.compare_conditions`) |
 | plots | UMAP, PCA, QC, dot plots, violins, heatmaps, volcano plots, overview figures |
-| export | `adata.to_anndata()` for Scanpy and the tools built on it |
+| settings | several analyses of the same cells (`adata.from_counts`), genes of your own in the selection (`include=`), agreement between analyses against the seed-to-seed noise (`ps.tl.compare_analyses`) |
+| saving | `adata.save(name)` and `ps.load(project, name)`: the counts pointed to, results linked, in memory or out of core |
+| export | `adata.write_h5ad(path)` (no `anndata` needed; streamed out of core; raw counts with `counts=True`) and `adata.to_anndata()` for Scanpy and the tools built on it |
 
 `ps.set_workflow("scanpy")` switches every default to Scanpy's own steps (gene
 ranking over all genes, no second normalization, UMAP from the exact spectral
@@ -293,7 +296,13 @@ start), for a step-by-step comparison with Scanpy.
 - **The project folder holds the block store.** Put it on a fast local disk.
   `ps.project(...).status()` shows what it holds, and its `README.md` says
   what may be deleted.
-- **Results stay in Polariseq's object.** `adata.to_anndata()` hands them to
+- **Save an analysis and continue it later.** `adata.save("clustered")` keeps
+  it in the project folder and `ps.load("my_analysis", "clustered")` opens it
+  again, in memory or out of core. The counts are not copied: the saved
+  analysis points to the files they came from (keep them in the project folder
+  and the two move together) and links the results the project already holds.
+  If a file has moved, loading says where it was expected.
+- **Other tools need an export.** `adata.to_anndata()` hands the results to
   Scanpy or writes an `.h5ad`.
 
 ## Reporting issues
@@ -308,7 +317,7 @@ If you use Polariseq, or results produced with it, cite it with the version you 
 [CITATION.cff](CITATION.cff), and GitHub's "Cite this repository" button gives it in APA and BibTeX:
 
 > Uthamkumar M, Dutta A, Basak T. Polariseq: atlas-scale single-cell analysis on the computer you have.
-> Version 0.2.0 (2026). https://github.com/DarkOxygen123/Polariseq
+> Version 0.2.1 (2026). https://github.com/DarkOxygen123/Polariseq
 
 ## License
 

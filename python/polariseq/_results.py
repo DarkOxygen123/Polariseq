@@ -36,7 +36,7 @@ def new(adata: Any, step: str, key: str, shape: tuple[int, ...], dtype: Any) -> 
     proj, name = current(), getattr(adata, "name", None)
     if proj is None or not name:
         return np.zeros(shape, dtype=dtype)
-    folder = proj.run_dir(name) / "results" / step
+    folder = proj.results_dir(name, getattr(adata, "analysis", None)) / step
     folder.mkdir(parents=True, exist_ok=True)
     for old in folder.glob(f"{key}.*.npy"):
         with contextlib.suppress(OSError):  # still mapped (Windows); removed at a later run

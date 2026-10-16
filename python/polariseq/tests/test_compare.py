@@ -184,5 +184,5 @@ def test_comparison_plots_draw(sim):
     ps.pl.fold_changes(res, genes=["g0", "g1"], show=False)
     panels = ps.pl.umap(a, color="cell_type", split_by="condition", show=False)
     assert len([p for p in panels if p.get_visible()]) == 2
-    with pytest.raises(ValueError, match="pick a group"):
+    with pytest.raises(ValueError, match="pick one with group="):
         ps.pl.volcano(res, show=False)

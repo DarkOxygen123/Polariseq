@@ -82,7 +82,7 @@ def test_annotate_joins_clusters_given_one_name_and_marks_the_rest(blobs) -> Non
 
 
 def test_annotate_refuses_a_cluster_that_does_not_exist(blobs) -> None:
-    with pytest.raises(KeyError, match="not in obs"):
+    with pytest.raises(KeyError, match=r"'99' not found in obs\['coarse'\]"):
         ps.tl.annotate(blobs, {"99": "x"}, groupby="coarse", key_added="bad")
 
 

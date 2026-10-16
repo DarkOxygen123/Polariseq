@@ -57,6 +57,62 @@ BG_SOFT = "#E7EBF0"     # fill for "other" points
 
 WASH = 0.32             # blend factor toward neutral for categorical colors
 
+# The tool's palette (themes other than "classic"): eight hues in a fixed
+# order, validated as a set for each surface (lightness band, chroma floor,
+# colour-blind and normal-vision separation of neighbours, contrast) with the
+# dataviz method's checker. The dark column is the same hues stepped for a dark
+# surface. Beyond eight groups the same hues follow, lighter then darker, and
+# the groups are numbered on the plot: no palette keeps more than a few groups
+# apart on a scatter by colour alone.
+PALETTE_LIGHT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100",
+                 "#e87ba4", "#008300", "#6250d6", "#e34948"]
+PALETTE_DARK = ["#3987e5", "#d95926", "#199e70", "#c98500",
+                "#d55181", "#008300", "#9085e9", "#e66767"]
+# One-hue blue for magnitudes (expression, counts), its low end kept visible
+# so cells without the gene keep the embedding's shape; blue <-> red with a
+# neutral grey midpoint for signed values (z-scores, fold changes). In the
+# dark versions the low end and the midpoint recede into the surface.
+_SEQ_LIGHT = ["#E3E8EE", "#b7d3f6", "#6da7ec", "#2a78d6", "#184f95", "#0d366b"]
+_SEQ_DARK = ["#2F3642", "#184f95", "#2a78d6", "#6da7ec", "#b7d3f6", "#e6f0fd"]
+_DIV_LIGHT = ["#184f95", "#6da7ec", "#f0efec", "#ef8a89", "#b8302f"]
+_DIV_DARK = ["#b7d3f6", "#3987e5", "#383835", "#e66767", "#f6b3b3"]
+
+
+def _srgb_to_oklab(hexc: str) -> tuple[float, float, float]:
+    r, g, b = (int(hexc[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    lin = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in (r, g, b)]
+    l_ = 0.4122214708 * lin[0] + 0.5363325363 * lin[1] + 0.0514459929 * lin[2]
+    m_ = 0.2119034982 * lin[0] + 0.6806995451 * lin[1] + 0.1073969566 * lin[2]
+    s_ = 0.0883024619 * lin[0] + 0.2817188376 * lin[1] + 0.6299787005 * lin[2]
+    l_, m_, s_ = (v ** (1 / 3) for v in (l_, m_, s_))
+    return (0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_,
+            1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_,
+            0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_)
+
+
+def _oklab_to_srgb(lab: tuple[float, float, float]) -> str:
+    L, a, b = lab
+    l_ = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3
+    m_ = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3
+    s_ = (L - 0.0894841775 * a - 1.2914855480 * b) ** 3
+    lin = (4.0767416621 * l_ - 3.3077115913 * m_ + 0.2309699292 * s_,
+           -1.2684380046 * l_ + 2.6097574011 * m_ - 0.3413193965 * s_,
+           -0.0041960863 * l_ - 0.7034186147 * m_ + 1.7076147010 * s_)
+    rgb = [12.92 * c if c <= 0.0031308 else 1.055 * c ** (1 / 2.4) - 0.055 for c in lin]
+    return "#" + "".join(f"{int(round(min(max(c, 0.0), 1.0) * 255)):02x}" for c in rgb)
+
+
+def _step(hexc: str, d_l: float) -> str:
+    """``hexc`` with its OKLab lightness moved by ``d_l``, hue and chroma kept."""
+    L, a, b = _srgb_to_oklab(hexc)
+    return _oklab_to_srgb((min(max(L + d_l, 0.25), 0.92), a, b))
+
+
+def _is_dark() -> bool:
+    """Whether the theme draws on a dark surface."""
+    h = _c("figure_bg")
+    return sum(int(h[i:i + 2], 16) for i in (1, 3, 5)) < 3 * 96
+
 
 def _wash(hexc: str, f: float = WASH) -> str:
     """Blend a color toward a soft neutral so palettes stop shouting."""
@@ -75,6 +131,28 @@ ACCENT = _wash("#0077BB", 0.18)         # primary series (calm steel blue)
 ACCENT_2 = _wash("#CC3311", 0.25)       # secondary series (soft brick)
 
 CONTINUOUS_CMAP = "cividis"
+
+
+def _plain_log(ax, axis: str) -> None:
+    """A log axis labelled with plain numbers (0.1, 1, 10, 2, 5) instead of
+    powers of ten, in the theme's colour."""
+    from matplotlib.ticker import FuncFormatter, LogLocator, NullFormatter
+
+    a = ax.xaxis if axis == "x" else ax.yaxis
+    a.set_major_locator(LogLocator(base=10, subs=(1.0, 2.0, 5.0)))
+    a.set_major_formatter(FuncFormatter(lambda v, _: f"{v:,g}"))
+    a.set_minor_formatter(NullFormatter())
+    ax.tick_params(axis=axis, which="both", colors=_c("text_sub"))
+
+
+def _subplots(plt, *args, **kw):
+    """``plt.subplots`` with the figure grown as the theme's type grows
+    (notebook 1.2x, talk 1.5x the paper size), so labels keep their room."""
+    scale = _THEME["base"] / 8.5
+    if scale != 1.0 and kw.get("figsize") is not None:
+        w, h = kw["figsize"]
+        kw["figsize"] = (w * scale, h * scale)
+    return plt.subplots(*args, **kw)
 
 
 def _plt():
@@ -126,10 +204,28 @@ _CMAP_SPECS = {
 _CMAPS: dict[str, Any] = {}
 
 
+_CMAP_SPECS.update({
+    "SEQ_LIGHT": (_SEQ_LIGHT, "polariseq_seq_light"), "SEQ_DARK": (_SEQ_DARK, "polariseq_seq_dark"),
+    "DIV_LIGHT": (_DIV_LIGHT, "polariseq_div_light"), "DIV_DARK": (_DIV_DARK, "polariseq_div_dark"),
+})
+
+
 def _cmap(key: str) -> Any:
     if key not in _CMAPS:
         _CMAPS[key] = _soft_cmap(*_CMAP_SPECS[key])
     return _CMAPS[key]
+
+
+def _role_cmap(role: str) -> Any:
+    """The theme's colour map for a job: ``'seq'`` (magnitude: expression,
+    counts), ``'dot'`` (a dot plot's mean expression) or ``'div'`` (signed:
+    z-scores, fold changes)."""
+    if _c("palette") == "classic":
+        if role == "seq":
+            return _cmap("EXPR_CMAP_DARK") if _THEME["name"] == "dark" else _cmap("EXPR_CMAP")
+        return _cmap({"div": "DIV_CMAP", "dot": "DOT_CMAP"}[role])
+    side = "DARK" if _is_dark() else "LIGHT"
+    return _cmap(("DIV_" if role == "div" else "SEQ_") + side)
 
 
 def __getattr__(name: str) -> Any:
@@ -167,6 +263,18 @@ _THEME = {
     "wash": WASH,
 }
 
+#: Every theme starts from these (the tool's light look).
+_BASE = {
+    "name": "paper", "base": 8.5, "title": 9.5, "label": 8.0, "tick": 6.8,
+    "legend": 6.8, "dpi": 300, "linewidth": 0.8, "point_scale": 1.0,
+    "text": TEXT, "text_sub": "#565E6B", "text_cap": "#6B7280",
+    "spine": "#C9CED6", "grid": GRID, "bg_soft": BG_SOFT,
+    "figure_bg": "#FFFFFF", "axes_bg": "#FFFFFF", "halo": "#FFFFFF",
+    "wash": 0.0, "palette": "polariseq", "accent": PALETTE_LIGHT[0], "accent_2": PALETTE_LIGHT[7],
+    "hatch": "#C9CED6",   # cells with nothing to show (not tested)
+}
+_THEME.update(_BASE)
+
 _PRESETS = {
     "paper": {},
     "notebook": {"base": 10.5, "title": 11.5, "label": 10.0, "tick": 8.5,
@@ -174,21 +282,28 @@ _PRESETS = {
     "talk": {"base": 13.0, "title": 14.5, "label": 12.5, "tick": 11.0,
              "legend": 11.0, "dpi": 120, "point_scale": 1.8},
     # Dark is a full colour inversion, not a background swap: text, spines,
-    # grid and the halo behind on-data labels all move, and categorical
-    # colours are washed *less* (0.18 against 0.32) because the same blend
-    # that keeps a palette calm on white makes it muddy on near-black.
+    # grid, the halo behind on-data labels, the palette (its dark steps) and
+    # the colour maps (their low ends recede into the surface) all move.
     "dark": {
-        "text": "#E8EAEE", "text_sub": "#9BA3AF", "text_cap": "#7C838F",
-        "spine": "#3A414D", "grid": "#2B313B",
+        "text": "#E8EAEE", "text_sub": "#A3ABB7", "text_cap": "#8E96A2",
+        "spine": "#4A525F", "grid": "#2B313B",
         "bg_soft": "#333A45", "figure_bg": "#181C22", "axes_bg": "#181C22",
-        "halo": "#181C22", "wash": 0.18,
+        "halo": "#181C22", "accent": PALETTE_DARK[0], "accent_2": PALETTE_DARK[7],
+        "hatch": "#4A525F",
         "dpi": 150, "point_scale": 1.2,
     },
-    # Maximum-legibility print: no wash, heavier lines, pure black text.
+    # Maximum-legibility print: heavier lines, pure black text.
     "print": {
-        "text": "#000000", "text_sub": "#444444", "text_cap": "#666666",
-        "spine": "#000000", "grid": "#DDDDDD", "wash": 0.0,
+        "text": "#000000", "text_sub": "#444444", "text_cap": "#555555",
+        "spine": "#000000", "grid": "#DDDDDD", "hatch": "#AAAAAA",
         "linewidth": 1.1, "dpi": 600,
+    },
+    # The look of Polariseq 0.2.0 and before (Paul Tol colours washed toward
+    # grey, its colour maps and greys): the paper's and the README's figures
+    # were drawn with it, and their scripts pin it so they draw the same.
+    "classic": {
+        "text_sub": TEXT_SUB, "text_cap": TEXT_CAP, "spine": SPINE, "wash": WASH,
+        "palette": "classic", "accent": ACCENT, "accent_2": ACCENT_2,
     },
 }
 
@@ -205,7 +320,9 @@ def set_theme(name: str = "paper", **overrides: Any) -> None:
     """Set the global theme, optionally overriding individual keys.
 
     Presets: ``paper`` (default, dense and small for figures), ``notebook``,
-    ``talk`` (large type for slides), ``dark``, ``print``.
+    ``talk`` (large type for slides), ``dark``, ``print``, and ``classic``
+    (the look of Polariseq 0.2.0, kept so figures made with it draw the same).
+    Larger type comes with larger figures, so nothing collides.
 
     Any theme key may be overridden::
 
@@ -213,18 +330,14 @@ def set_theme(name: str = "paper", **overrides: Any) -> None:
 
     Themes reset from the ``paper`` baseline each time, so switching between
     them does not accumulate the previous one's overrides.
+
+    Args:
+        name: ``'paper'``, ``'notebook'``, ``'talk'``, ``'dark'``, ``'print'`` or ``'classic'``.
+        **overrides: Theme keys to change (``point_scale``, ``dpi``, ...).
     """
     if name not in _PRESETS:
         raise ValueError(f"unknown theme {name!r}; choose from {list(_PRESETS)}")
-    base = {
-        "name": "paper", "base": 8.5, "title": 9.5, "label": 8.0, "tick": 6.8,
-        "legend": 6.8, "dpi": 300, "linewidth": 0.8, "point_scale": 1.0,
-        "text": TEXT, "text_sub": TEXT_SUB, "text_cap": TEXT_CAP,
-        "spine": SPINE, "grid": GRID, "bg_soft": BG_SOFT,
-        "figure_bg": "#FFFFFF", "axes_bg": "#FFFFFF", "halo": "#FFFFFF",
-        "wash": WASH,
-    }
-    _THEME.update(base)
+    _THEME.update(_BASE)
     _THEME.update(_PRESETS[name], name=name)
     unknown = set(overrides) - set(_THEME)
     if unknown:
@@ -262,11 +375,24 @@ def get_theme() -> dict:
 
 
 def categorical_palette(n: int, washed: bool = True) -> list[str]:
-    """Palette for n classes: washed Tol, or golden-angle HSL beyond 22."""
-    # Wash comes from the theme: the blend that keeps a palette calm on white
-    # makes it muddy on near-black, so `dark` washes less (0.18 vs 0.32) and
-    # `print` not at all.
-    base = [_wash(c, _c("wash")) for c in _TOL_RAW] if washed else _TOL_RAW
+    """Palette for n classes: washed Tol, or golden-angle HSL beyond 22.
+
+    Args:
+        n: Number of colours.
+        washed: Soften the colours (the theme's wash) so many groups stay calm; ``False`` gives the
+            full colours.
+
+    Returns:
+        A list of hex colours.
+    """
+    if _c("palette") == "classic":
+        base = [_wash(c, _c("wash")) for c in _TOL_RAW] if washed else _TOL_RAW
+    else:
+        eight = PALETTE_DARK if _is_dark() else PALETTE_LIGHT
+        # past eight groups the same hues again, lighter, then darker
+        base = eight + [_step(c, 0.13) for c in eight] + [_step(c, -0.13) for c in eight]
+        if washed and _c("wash"):
+            base = [_wash(c, _c("wash")) for c in base]
     if n <= len(base):
         return base[:n]
     import colorsys
@@ -281,7 +407,7 @@ def categorical_palette(n: int, washed: bool = True) -> list[str]:
 
 
 def _categorical_colors(labels: np.ndarray, palette: list[str] | None = None):
-    cats = sorted(set(labels.tolist()))
+    cats = sorted(set(labels.tolist()), key=_label_key)
     pal = palette if palette is not None else categorical_palette(len(cats))
     cat_to_color = dict(zip(cats, pal, strict=False))
     colors = np.array([cat_to_color[v] for v in labels])
@@ -299,15 +425,32 @@ def _heading(ax, title: str | None = None, subtitle: str | None = None, lift: fl
     height put it on the title once the canvas grew). ``lift`` raises it, in
     points, for plots that put a y-axis label at the top of the axes, which it
     would otherwise touch."""
+    ax._ps_heading = (title, subtitle, lift)
+    _place_heading(ax)
+
+
+def _place_heading(ax) -> None:
+    """Draw (or redraw) the heading :func:`_heading` recorded, above a y-axis
+    label set at the axis top when there is one, at offsets that grow with the
+    theme's type."""
+    title, subtitle, lift = ax._ps_heading
     t = _THEME
+    f = t["base"] / 8.5
+    if getattr(ax, "_ps_ylabel_top", False):
+        lift = max(lift, t["label"] * 1.7)
+    old = getattr(ax, "_ps_subtitle", None)
+    if old is not None:
+        old.remove()
+        ax._ps_subtitle = None
     if title:
         ax.set_title(title, loc="left", fontsize=t["title"],
                      fontweight="normal", color=_c("text"),
-                     pad=(24 + lift) if subtitle else 8)
+                     pad=(24 * f + lift) if subtitle else 8 * f + lift)
     if subtitle:
-        ax.annotate(subtitle, xy=(0.0, 1.0), xycoords="axes fraction",
-                    xytext=(0, 9 + lift), textcoords="offset points",
-                    fontsize=t["tick"], color=_c("text_sub"), va="bottom", ha="left")
+        ax._ps_subtitle = ax.annotate(
+            subtitle, xy=(0.0, 1.0), xycoords="axes fraction",
+            xytext=(0, 9 * f + lift), textcoords="offset points",
+            fontsize=t["tick"], color=_c("text_sub"), va="bottom", ha="left")
 
 
 def _caption(ax, text: str | None):
@@ -329,6 +472,9 @@ def _axis_labels(ax, xlabel: str | None = None, ylabel: str | None = None):
         ax.set_ylabel(ylabel, fontsize=t["label"], color=_c("text"), rotation=0,
                       ha="left", va="bottom", labelpad=8)
         ax.yaxis.set_label_coords(-0.02, 0.998)
+        ax._ps_ylabel_top = True
+        if hasattr(ax, "_ps_heading"):   # drawn already: lift it above the label
+            _place_heading(ax)
 
 
 def _apply_axes_style(ax, frame: bool = False, grid: str | None = None):
@@ -348,7 +494,7 @@ def _apply_axes_style(ax, frame: bool = False, grid: str | None = None):
         for side in ("left", "bottom"):
             ax.spines[side].set_color(_c("spine"))
             ax.spines[side].set_linewidth(t["linewidth"] * 0.75)
-        ax.tick_params(labelsize=t["tick"], colors=_c("text_sub"), length=2.5,
+        ax.tick_params(which="both", labelsize=t["tick"], colors=_c("text_sub"), length=2.5,
                        width=t["linewidth"] * 0.6)
         if grid:
             ax.grid(axis=grid, color=_c("grid"), linewidth=0.5)
@@ -392,6 +538,20 @@ LABEL_WRAP = 18
 #: A column of whole numbers with at most this many distinct values is drawn
 #: as groups (cluster labels), not as a gradient.
 MAX_INTEGER_GROUPS = 500
+
+
+def _auto_labels(n_groups: int, on_data: bool, legend_loc: str | None) -> str | None:
+    """Numbers on the groups when there are more than the palette's eight hues: past
+    them colours repeat in lighter and darker steps, and on a scatter only a label
+    tells such groups apart (the README's cluster maps use the same style). With
+    ``on_data``, the names themselves, placed so that none overlaps another."""
+    if _c("palette") == "classic":
+        return None
+    if on_data:   # names on the groups; one that would collide becomes a callout
+        return "name" if n_groups <= MAX_LEGEND else None
+    if legend_loc in (None, "none", "off") or not len(PALETTE_LIGHT) < n_groups <= MAX_LEGEND:
+        return None
+    return "number"
 
 
 def _use_density(render: str, n: int) -> bool:
@@ -486,6 +646,14 @@ def _raster_continuous(ax, pix, values, cmap, norm, shape, extent, alpha: float,
     return sm
 
 
+def _label_key(g: Any) -> tuple:
+    """Numbers, and numeric labels such as clusters "0" to "12", numerically; then text."""
+    try:
+        return (0, float(g), "")
+    except (TypeError, ValueError):
+        return (1, 0.0, str(g))
+
+
 def _codes(vals: np.ndarray, series: Any = None):
     """Groups of a label column as (sorted groups, integer code per cell),
     without a Python object per cell: tens of millions of labels in seconds."""
@@ -496,7 +664,7 @@ def _codes(vals: np.ndarray, series: Any = None):
     else:
         cat = pd.Categorical(vals)
     present = np.unique(np.asarray(cat.codes)[np.asarray(cat.codes) >= 0])
-    groups = sorted(cat.categories[present].tolist())
+    groups = sorted(cat.categories[present].tolist(), key=_label_key)
     remap = np.full(len(cat.categories), -1, dtype=np.int64)
     remap[present] = [groups.index(g) for g in cat.categories[present].tolist()]
     codes = np.asarray(cat.codes, dtype=np.int64)
@@ -581,6 +749,16 @@ def _save(fig, save: str | None, dpi: int | None = None):
                     facecolor=_c("figure_bg"))
 
 
+def _legend(ax, **kw):
+    """``ax.legend`` in the theme's text colour (Matplotlib's default is black
+    whatever the background)."""
+    kw.setdefault("labelcolor", _c("text"))
+    leg = ax.legend(**kw)
+    if leg is not None:
+        leg.get_title().set_color(_c("text_sub"))
+    return leg
+
+
 def _legend_out(ax, cat_to_color: dict, cats: list, loc: str | None = "right",
                 legend_title: str | None = None, max_entries: int = 40):
     import matplotlib.lines as mlines
@@ -599,16 +777,16 @@ def _legend_out(ax, cat_to_color: dict, cats: list, loc: str | None = "right",
         kw["title"] = legend_title
         kw["title_fontsize"] = t["legend"]
     if loc in ("right", "right margin"):
-        ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(1.02, 1.0),
+        _legend(ax, handles=handles, loc="upper left", bbox_to_anchor=(1.02, 1.0),
                   **kw)
     elif loc in ("top", "upper"):
-        ax.legend(handles=handles, loc="lower left", bbox_to_anchor=(0.0, 1.02),
+        _legend(ax, handles=handles, loc="lower left", bbox_to_anchor=(0.0, 1.02),
                   ncol=min(len(show), 6), **kw)
     elif loc in ("bottom", "lower"):
-        ax.legend(handles=handles, loc="upper center",
+        _legend(ax, handles=handles, loc="upper center",
                   bbox_to_anchor=(0.5, -0.10), ncol=min(len(show), 6), **kw)
     else:  # any matplotlib location string
-        ax.legend(handles=handles, loc=loc, **kw)
+        _legend(ax, handles=handles, loc=loc, **kw)
 
 
 def _on_data_labels(ax, coords: np.ndarray, vals: np.ndarray, cats: list,
@@ -634,7 +812,7 @@ def _on_data_labels(ax, coords: np.ndarray, vals: np.ndarray, cats: list,
     for text, (_, x, y) in best.items():
         ax.text(x, y, text, fontsize=fs, color=_c("text"), ha="center", va="center",
                 fontweight="normal", zorder=6,
-                path_effects=[pe.withStroke(linewidth=2.6, foreground="white",
+                path_effects=[pe.withStroke(linewidth=2.6, foreground=_c("halo"),
                                             alpha=0.9)])
 
 
@@ -695,16 +873,21 @@ def _cluster_labels(ax, centres: dict, cats: list, colours: dict, *, style: str 
 
     # numbers, largest group first
     numbered = sorted((g for g, s in chosen.items() if s == "number"), key=lambda g: -centres[g][0])
+    # groups already named by numbers (clusters) keep their own: disc "5" is cluster "5"
+    own = all(str(names[g]).isdigit() for g in numbered)
+    if own:
+        numbered = sorted(numbered, key=lambda g: int(names[g]))
     handles = []
     for k, g in enumerate(numbered, 1):
         _, x, y = centres[g]
-        ax.plot(x, y, "o", ms=fs * 1.45, mfc="white", mec=_c("text"), mew=0.6, zorder=7)
-        txt = ax.text(x, y, str(k), fontsize=fs * 0.82, fontweight="bold", ha="center", va="center",
+        mark = str(names[g]) if own else str(k)
+        ax.plot(x, y, "o", ms=fs * 1.45, mfc=_c("halo"), mec=_c("text"), mew=0.6, zorder=7)
+        txt = ax.text(x, y, mark, fontsize=fs * 0.82, fontweight="bold", ha="center", va="center",
                       color=_c("text"), zorder=8)
         placed.append(txt.get_window_extent(renderer).expanded(1.6, 1.6))
         handles.append(mlines.Line2D([], [], marker="s", ls="", markersize=t["legend"] * 0.9,
                                      markerfacecolor=colours[g], markeredgecolor="none",
-                                     label=f"{k}  {names[g]}"))
+                                     label=mark if own else f"{k}  {names[g]}"))
         done["number"].append(names[g])
 
     # names on the groups; one that would overlap a label already drawn becomes a callout
@@ -768,12 +951,12 @@ def _cluster_labels(ax, centres: dict, cats: list, colours: dict, *, style: str 
         if legend_title:
             kw.update(title=legend_title, title_fontsize=t["legend"])
         if legend_loc in ("right", "right margin"):
-            ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(legend_x if calls else 1.02, 1.0), **kw)
+            _legend(ax, handles=handles, loc="upper left", bbox_to_anchor=(legend_x if calls else 1.02, 1.0), **kw)
         elif legend_loc in ("bottom", "lower"):
-            ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.06),
+            _legend(ax, handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.06),
                       ncol=min(len(handles), 3), **kw)
         else:
-            ax.legend(handles=handles, loc=legend_loc, **kw)
+            _legend(ax, handles=handles, loc=legend_loc, **kw)
     ax.polariseq_labels = done
     return done
 
@@ -815,8 +998,13 @@ def _embedding(
 
     if labels is not None and labels not in LABEL_STYLES + ("auto",):
         raise ValueError(f"labels={labels!r}: use one of {LABEL_STYLES + ('auto',)}")
+    if legend_loc == "on data":
+        on_data = True   # the names go on the groups, in place of the legend
     if basis not in adata.obsm:
-        raise KeyError(f"basis {basis!r} not in obsm; run the analysis first")
+        from polariseq import _checks
+
+        _checks.result(adata, basis, what="the embedding plot", where="obsm",
+                       made_by=_checks.made_by(basis))
     coords = np.asarray(adata.obsm[basis][:, :2], dtype=float)
     n = len(coords)
     t = _THEME
@@ -834,12 +1022,14 @@ def _embedding(
                 col = pd.Series(np.asarray(col))
             if not pd.api.types.is_float_dtype(col.dtype) and col.nunique() > MAX_LEGEND:
                 size_in = (6.6, 6.6)
-        fig, ax = plt.subplots(figsize=figsize or size_in, dpi=dpi or t["dpi"])
+        fig, ax = _subplots(plt, figsize=figsize or size_in, dpi=dpi or t["dpi"])
     else:
         fig = ax.figure
 
     _apply_axes_style(ax, frame=frame)
-    ax.set_aspect("equal", adjustable="box")
+    # Alone, the axis shrinks to the data's shape; in a grid of panels the data
+    # limits widen instead, so every panel keeps its box and the titles line up.
+    ax.set_aspect("equal", adjustable="box" if own_fig else "datalim")
     dense = _use_density(render, n)
     if dense:
         pix, shape, extent = _raster_grid(coords)
@@ -913,6 +1103,8 @@ def _embedding(
             else:
                 _raster_categorical(ax, pix, codes, rgb, shape, extent, alpha)
                 cats_shown = cats
+            labels = labels if labels is not None else _auto_labels(len(cats_shown), on_data,
+                                                                    legend_loc)
             if labels is not None:
                 centres = _group_anchors(coords, codes, len(cats))
                 shown = {cats.index(c) for c in cats_shown}
@@ -962,6 +1154,7 @@ def _embedding(
                 ax.scatter(coords[order, 0], coords[order, 1], s=s,
                            c=colors[order], edgecolors="none",
                            rasterized=n > 20_000, alpha=alpha)
+            labels = labels if labels is not None else _auto_labels(len(cats), on_data, legend_loc)
             if labels is not None:
                 gcats, gcodes = _codes(vals, series)
                 centres = _group_anchors(coords, gcodes, len(gcats))
@@ -1010,9 +1203,11 @@ def _embedding(
                 f"highly-variable genes, so most genes are no longer in it — "
                 f"pass subset=False to highly_variable_genes() to keep them."
             )
-        raise KeyError(
-            f"color {color!r} is neither a column of .obs nor a gene in "
-            f".var_names.{hint}"
+        from polariseq import _checks
+
+        raise _checks.InputError(
+            f"color {color!r} is neither a column of adata.obs nor a gene in var_names."
+            f"{_checks.suggest(color, [*adata.obs, *map(str, adata.var_names)])}{hint}"
         )
 
     auto_sub = subtitle if subtitle is not None else (
@@ -1051,6 +1246,12 @@ def embedding(
     `umap` and `pca` are thin wrappers over this; use it directly for a basis
     they do not cover (`X_tsne`, a custom projection). The leading `X_` is
     optional: ``basis="umap"`` and ``basis="X_umap"`` both work.
+
+    Args:
+        basis: The ``obsm`` embedding (``'X_umap'``, ``'X_pca'``, ...).
+        color: An ``obs`` column or a gene; a list draws one panel each.
+        **kw: As for :func:`umap` (``size``, ``title``, ``legend_loc``, ``groups``, ``split_by``,
+            ``ncols``, ...).
     """
     if basis not in adata.obsm and f"X_{basis}" in adata.obsm:
         basis = f"X_{basis}"
@@ -1091,7 +1292,7 @@ def _split_embedding(adata, basis, color, split_by, *, ncols=None, figsize=None,
                    rasterized=len(coords) > 20_000, alpha=0.5, zorder=1)
         idx = [i for i in order if sarr[i] == lev]
         if color is None:
-            fg = ACCENT
+            fg = _c("accent")
         elif cats is not None:
             fg = colors[idx]
         else:
@@ -1113,7 +1314,7 @@ def _split_embedding(adata, basis, color, split_by, *, ncols=None, figsize=None,
 
 def _expr_cmap():
     """The expression ramp for the active theme."""
-    return _cmap("EXPR_CMAP_DARK") if _THEME["name"] == "dark" else _cmap("EXPR_CMAP")
+    return _role_cmap("seq")
 
 
 def _data_aspect(coords: np.ndarray) -> float:
@@ -1148,7 +1349,7 @@ def _panel_grid(n: int, ncols: int | None, figsize, dpi, aspect: float | None = 
         w, h = panel_w * ncols, (panel_w / a) * nrows
     else:
         w, h = figsize or (4.3 * ncols, 3.6 * nrows)
-    fig, axes = plt.subplots(nrows, ncols, figsize=(w, h),
+    fig, axes = _subplots(plt, nrows, ncols, figsize=(w, h),
                              dpi=dpi or _THEME["dpi"], squeeze=False)
     fig.patch.set_facecolor(_c("figure_bg"))
     flat = [a for row in axes for a in row]
@@ -1211,6 +1412,12 @@ def umap(
 
         ps.tl.auto_annotate(adata)                # writes obs['cell_type']
         ps.pl.umap(adata, color='cell_type', on_data=True)
+
+    Args:
+        color: An ``obs`` column or a gene to colour the cells by (a list draws one panel each);
+            ``None`` draws the cells in grey.
+        **kw: ``groups=`` (highlight some groups), ``split_by=`` (one panel per level of a column),
+            ``labels=`` (name groups on the plot), ``palette=``, ``subtitle=``, ``render=``.
     """
     split_by = kw.pop("split_by", None)
     if split_by is not None:
@@ -1235,14 +1442,22 @@ def pca(
     show: bool = True, save: str | None = None,
     legend_loc: str | None = "right", **kw,
 ) -> Any:
-    """PCA scatter (PC1 vs PC2). Same extra attributes as :func:`umap`."""
+    """PCA scatter (PC1 vs PC2). Same extra attributes as :func:`umap`.
+
+    Args:
+        color: An ``obs`` column or a gene to colour the cells by.
+    """
     return _embedding(adata, "X_pca", color, ax, size, title, cmap, show,
                       save, legend_loc, **kw)
 
 
 def pca_variance_ratio(adata: AnnData, ax: Any | None = None, show: bool = True,
                        save: str | None = None, n_comps: int = 30, **kw) -> Any:
-    """Variance explained per PC + cumulative curve on one calm axis."""
+    """Variance explained per PC + cumulative curve on one calm axis.
+
+    Args:
+        n_comps: Principal components shown.
+    """
     plt = _plt()
     t = _THEME
     vr = np.asarray(adata.uns["pca"]["variance_ratio"], dtype=float)[:n_comps]
@@ -1251,12 +1466,12 @@ def pca_variance_ratio(adata: AnnData, ax: Any | None = None, show: bool = True,
 
     own = ax is None
     if own:
-        fig, ax = plt.subplots(figsize=(4.2, 2.9), dpi=kw.pop("dpi", t["dpi"]))
+        fig, ax = _subplots(plt, figsize=(4.2, 2.9), dpi=kw.pop("dpi", t["dpi"]))
     else:
         fig = ax.figure
     _apply_axes_style(ax, frame=True, grid="y")
-    ax.bar(x, vr * 100.0, color=ACCENT, alpha=0.85, width=0.78, edgecolor="none")
-    ax.plot(x, cum, "o-", color=ACCENT_2, markersize=2.4, linewidth=1.1)
+    ax.bar(x, vr * 100.0, color=_c("accent"), alpha=0.85, width=0.78, edgecolor="none")
+    ax.plot(x, cum, "o-", color=_c("accent_2"), markersize=2.4, linewidth=1.1)
     ax.set_ylim(0, 105)
     _axis_labels(ax, xlabel="principal component",
                  ylabel="variance explained (%)")
@@ -1273,6 +1488,27 @@ def pca_variance_ratio(adata: AnnData, ax: Any | None = None, show: bool = True,
 # ---------------------------------------------------------------------------
 # Distributions
 # ---------------------------------------------------------------------------
+
+def _present_genes(adata: AnnData, markers: list, groupby: str, what: str) -> list:
+    """The genes of ``markers`` the data hold, checking ``groupby`` too: genes
+    that are missing are named in a warning, and none at all is an error that
+    says why each is missing."""
+    import warnings
+
+    from polariseq import _checks, _source_gene_names
+
+    _checks.groups_column(adata, groupby, what=what)
+    known = set(map(str, adata.var_names))
+    present = [g for g in markers if str(g) in known]
+    if not present:
+        _checks.gene_positions(adata.var_names, markers, what=what,
+                               source_names=_source_gene_names(adata))
+    missing = [str(g) for g in markers if str(g) not in known]
+    if missing:
+        warnings.warn(f"{what}: {len(missing)} of the {len(markers)} genes are not in the data "
+                      f"and are left out: {_checks.listing(missing)}", stacklevel=3)
+    return present
+
 
 def _values_for(adata: AnnData, key: str) -> np.ndarray:
     """Per-cell values for `key`, from `obs` or from gene expression.
@@ -1296,9 +1532,11 @@ def _gene_values(adata: AnnData, genes: list[str]) -> np.ndarray:
     where = {g: i for i, g in enumerate(names)}
     missing = [g for g in genes if str(g) not in where]
     if missing:
-        raise KeyError(
-            f"{missing[0]!r} is neither a column of .obs nor a gene in .var_names. "
-            f"Available obs columns: {sorted(adata.obs)}"
+        from polariseq import _checks
+
+        raise _checks.InputError(
+            f"{_checks.listing(missing)}: neither a column of adata.obs nor a gene in var_names."
+            f"{_checks.suggest(missing[0], [*adata.obs, *names])} Columns: {_checks.listing(adata.obs)}."
         )
     # a gene asked for twice (two clusters sharing a top marker) is read once
     idx, inverse = np.unique(np.array([where[str(g)] for g in genes], dtype=np.int64),
@@ -1401,10 +1639,21 @@ def violin(
     split by that column: two conditions as the left and right halves of one
     violin, more as violins side by side, so a gene's change between
     conditions reads within each cell type.
+
+    Args:
+        keys: ``obs`` columns or genes, one violin set each.
+        groupby: ``obs`` column of the groups (default: all cells as one).
+        split_by: ``obs`` column of two levels (for example the condition), drawn as the two halves
+            of each violin.
     """
+    from polariseq import _checks
+
+    if groupby is not None:
+        _checks.groups_column(adata, groupby, what="violin")
     if split_by is not None:
         if groupby is None:
-            raise ValueError("split_by needs a groupby")
+            raise ValueError("violin: split_by needs a groupby (the groups each violin is split in)")
+        _checks.groups_column(adata, split_by, what="violin", arg="split_by")
         return _split_violin(adata, [keys] if isinstance(keys, str) else list(keys), groupby,
                              split_by, ax=ax, show=show, save=save, **kw)
     plt = _plt()
@@ -1419,8 +1668,10 @@ def violin(
         n_keys = len(keys)
         own = ax is None
         if own:
-            fig, axes = plt.subplots(
-                1, n_keys, figsize=(max(n_keys * 2.1, 3.0), 3.0), dpi=t["dpi"])
+            # room for every group's name: about a third of an inch per group
+            per = max(2.1, 0.3 * len(groups))
+            fig, axes = _subplots(plt, 1, n_keys, figsize=(max(n_keys * per, 3.0), 3.0),
+                                  dpi=t["dpi"])
             axes = np.atleast_1d(axes)
         else:
             fig, axes = ax.figure, np.atleast_1d(ax)
@@ -1444,19 +1695,20 @@ def violin(
                             zorder=3, edgecolor=_c("text"), linewidth=0.7)
             _apply_axes_style(axes[i], frame=True, grid="y")
             axes[i].set_xticks(range(len(groups)))
-            rot = 45 if len(groups) > 12 else 0
-            axes[i].set_xticklabels([str(g) for g in groups],
+            # names tilt once they would not fit side by side
+            rot = 45 if len(groups) > 12 or sum(len(str(g)) for g in groups) > 4 * len(groups) else 0
+            axes[i].set_xticklabels([str(g) for g in groups], color=_c("text"),
                                     fontsize=t["tick"], rotation=rot,
                                     ha="right" if rot else "center")
             axes[i].set_xlabel(str(groupby), fontsize=t["tick"], color=_c("text_sub"))
             axes[i].set_ylabel("")
-        _axis_labels(axes[0], ylabel=str(keys[0]))
+            _axis_labels(axes[i], ylabel=str(key))   # each panel names its own gene or metric
         _heading(axes[0], title or " / ".join(keys), subtitle)
     else:
         n_keys = len(keys)
         own = ax is None
         if own:
-            fig, axes = plt.subplots(1, n_keys, figsize=(n_keys * 1.9, 2.7),
+            fig, axes = _subplots(plt, 1, n_keys, figsize=(n_keys * 1.9, 2.7),
                                      dpi=t["dpi"])
             axes = np.atleast_1d(axes)
         else:
@@ -1467,7 +1719,7 @@ def violin(
             v = axes[i].violinplot([vals], positions=[0], showextrema=False,
                                    widths=0.7)
             for pc in v["bodies"]:
-                pc.set_facecolor(ACCENT)
+                pc.set_facecolor(_c("accent"))
                 pc.set_alpha(0.5)
                 pc.set_edgecolor("none")
             med = np.median(vals)
@@ -1476,7 +1728,7 @@ def violin(
             _apply_axes_style(axes[i], frame=True, grid="y")
             axes[i].set_xticks([])
             axes[i].set_ylabel("")
-        _axis_labels(axes[0], ylabel=str(keys[0]))
+            _axis_labels(axes[i], ylabel=str(key))
         _heading(axes[0], title or "distributions", subtitle)
     fig.tight_layout()
     _caption(axes[0], caption)
@@ -1496,11 +1748,11 @@ def _split_violin(adata: AnnData, keys: list[str], groupby: str, split_by: str, 
     levels = _levels(adata.obs[split_by])
     garr = np.asarray(adata.obs[groupby])
     sarr = np.asarray(adata.obs[split_by])
-    pal = kw.pop("palette", None) or [ACCENT, ACCENT_2, *categorical_palette(max(1, len(levels)))]
+    pal = kw.pop("palette", None) or [_c("accent"), _c("accent_2"), *categorical_palette(max(1, len(levels)))]
     values = _values(adata, keys)
     own = ax is None
     if own:
-        fig, axes = plt.subplots(len(keys), 1, dpi=kw.pop("dpi", t["dpi"]), squeeze=False,
+        fig, axes = _subplots(plt, len(keys), 1, dpi=kw.pop("dpi", t["dpi"]), squeeze=False,
                                  figsize=kw.pop("figsize", (max(4.2, 0.62 * len(groups) + 1.2),
                                                             1.9 * len(keys) + 0.6)))
         axes = axes[:, 0]
@@ -1542,7 +1794,7 @@ def _split_violin(adata: AnnData, keys: list[str], groupby: str, split_by: str, 
         panel.set_xticklabels([])
     handles = [Patch(color=pal[i % len(pal)], alpha=0.72, label=str(lev))
                for i, lev in enumerate(levels)]
-    axes[0].legend(handles=handles, frameon=False, fontsize=t["legend"], ncol=len(levels),
+    _legend(axes[0], handles=handles, frameon=False, fontsize=t["legend"], ncol=len(levels),
                    loc="lower right", bbox_to_anchor=(1.0, 1.0), handlelength=1.0,
                    columnspacing=0.9)
     _heading(axes[0], kw.pop("title", None), kw.pop("subtitle", None))
@@ -1558,7 +1810,10 @@ def _result_table(result: Any, key: str = "compare_conditions") -> pd.DataFrame:
     if isinstance(result, pd.DataFrame):
         return result
     if key not in result.uns:
-        raise KeyError(f"{key!r} not in .uns: run ps.tl.compare_conditions first")
+        from polariseq import _checks
+
+        raise _checks.InputError(f"no comparison under adata.uns[{key!r}]: run "
+                                 "ps.tl.compare_conditions first, or pass its table")
     return result.uns[key]["table"]
 
 
@@ -1572,6 +1827,15 @@ def volcano(result: Any, group: str | None = None, *, condition: str | None = No
     it was run on. Genes past both thresholds (``adj_p_value < alpha`` and
     ``|log2 fold change| >= min_log2_fold_change``) are coloured, up and
     down, and the most significant are named.
+
+    Args:
+        result: The table ``ps.tl.compare_conditions`` returns, or the analysis it was run on.
+        group: The cell type to show (required when the table holds several).
+        condition: The condition to show, when several were compared.
+        n_labels: Genes named, the most significant first.
+        alpha: Adjusted p-value threshold.
+        min_log2_fold_change: Absolute log2 fold change threshold.
+        key: Where in ``uns`` the comparison is, when ``result`` is the analysis.
     """
     plt = _plt()
     t = _THEME
@@ -1580,8 +1844,12 @@ def volcano(result: Any, group: str | None = None, *, condition: str | None = No
     if group is None:
         present = table[gcol].unique()
         if len(present) > 1:
-            raise ValueError(f"pick a group: {[str(g) for g in present]}")
+            raise ValueError(f"volcano: the table holds {len(present)} groups; pick one with "
+                             f"group=, one of {[str(g) for g in present]}")
         group = present[0]
+    from polariseq import _checks
+
+    _checks.values_in([group], table[gcol].unique(), what="volcano group", column=f"the table's {gcol!r}")
     sel = table[table[gcol].astype(str) == str(group)]
     if condition is not None:
         sel = sel[sel["condition"].astype(str) == str(condition)]
@@ -1594,13 +1862,13 @@ def volcano(result: Any, group: str | None = None, *, condition: str | None = No
     rest = ~(up | down)
     own = ax is None
     if own:
-        fig, ax = plt.subplots(figsize=kw.pop("figsize", (4.2, 3.4)), dpi=kw.pop("dpi", t["dpi"]))
+        fig, ax = _subplots(plt, figsize=kw.pop("figsize", (4.2, 3.4)), dpi=kw.pop("dpi", t["dpi"]))
     else:
         fig = ax.figure
     _apply_axes_style(ax, frame=True, grid="y")
     ax.scatter(x[rest], y[rest], s=6, color=_c("bg_soft"), edgecolors="none", rasterized=True)
-    ax.scatter(x[up], y[up], s=9, color=ACCENT_2, edgecolors="none", label=f"up ({up.sum()})")
-    ax.scatter(x[down], y[down], s=9, color=ACCENT, edgecolors="none", label=f"down ({down.sum()})")
+    ax.scatter(x[up], y[up], s=9, color=_c("accent_2"), edgecolors="none", label=f"up ({up.sum()})")
+    ax.scatter(x[down], y[down], s=9, color=_c("accent"), edgecolors="none", label=f"down ({down.sum()})")
     for v in (-min_log2_fold_change, min_log2_fold_change):
         ax.axvline(v, color=_c("spine"), linewidth=0.7, linestyle=(0, (3, 2)))
     ax.axhline(-np.log10(alpha), color=_c("spine"), linewidth=0.7, linestyle=(0, (3, 2)))
@@ -1608,7 +1876,7 @@ def volcano(result: Any, group: str | None = None, *, condition: str | None = No
     _place_labels(ax, [(float(r["log2_fold_change"]), float(r["_y"]), str(r["gene"]))
                        for _, r in top.iterrows()], t["tick"] - 0.5, _c("text"))
     ax.tick_params(labelsize=t["tick"], colors=_c("text_sub"))
-    ax.legend(frameon=False, fontsize=t["legend"], loc="upper left", handletextpad=0.2)
+    _legend(ax, frameon=False, fontsize=t["legend"], loc="upper left", handletextpad=0.2)
     _axis_labels(ax, xlabel="log2 fold change", ylabel="-log10 adjusted p")
     cond = str(sel["condition"].iloc[0]) if len(sel) else ""
     _heading(ax, kw.pop("title", f"{group}"), kw.pop("subtitle", f"{cond}, {len(sel):,} genes tested"))
@@ -1626,8 +1894,16 @@ def fold_changes(result: Any, genes: list[str] | None = None, *, condition: str 
     """Which cell types respond: log2 fold changes, genes against cell types.
 
     ``genes`` defaults to the ``n_genes`` most significant of each cell type.
-    A dot marks ``adj_p_value < alpha``; a blank cell, a gene not tested there
+    A dot marks ``adj_p_value < alpha``; a hatched cell, a gene not tested there
     (too little expression in that cell type).
+
+    Args:
+        result: The table ``ps.tl.compare_conditions`` returns, or the analysis it was run on.
+        genes: Genes to show (default: the most significant of each cell type).
+        condition: The condition to show, when several were compared.
+        n_genes: Genes taken from each cell type when ``genes`` is not given.
+        alpha: Adjusted p-value below which a change is marked.
+        key: Where in ``uns`` the comparison is, when ``result`` is the analysis.
     """
     plt = _plt()
     t = _THEME
@@ -1656,20 +1932,28 @@ def fold_changes(result: Any, genes: list[str] | None = None, *, condition: str 
                 sig[i, j] = row["adj_p_value"] < alpha
     own = ax is None
     if own:
-        fig, ax = plt.subplots(figsize=kw.pop("figsize", (0.55 * len(groups) + 2.2,
+        fig, ax = _subplots(plt, figsize=kw.pop("figsize", (0.55 * len(groups) + 2.2,
                                                            0.24 * len(genes) + 1.4)),
                                dpi=kw.pop("dpi", t["dpi"]))
     else:
         fig = ax.figure
     vmax = float(np.nanpercentile(np.abs(lfc), 98)) if np.isfinite(lfc).any() else 1.0
-    im = ax.imshow(np.ma.masked_invalid(lfc), cmap=kw.pop("cmap", _cmap("DIV_CMAP")), vmin=-vmax,
+    ax.set_facecolor(_c("axes_bg"))
+    fig.patch.set_facecolor(_c("figure_bg"))
+    im = ax.imshow(np.ma.masked_invalid(lfc), cmap=kw.pop("cmap", _role_cmap("div")), vmin=-vmax,
                    vmax=vmax, aspect="auto")
+    # not tested (too little expression there): hatched, so it is not read as no change
+    from matplotlib.patches import Rectangle
+    for i, j in zip(*np.nonzero(~np.isfinite(lfc)), strict=True):
+        ax.add_patch(Rectangle((j - 0.5, i - 0.5), 1, 1, fill=False, hatch="////",
+                               edgecolor=_c("hatch"), linewidth=0))
     yy, xx = np.nonzero(sig)
     ax.scatter(xx, yy, s=5, color=_c("text"), edgecolors="none")
     ax.set_xticks(range(len(groups)))
-    ax.set_xticklabels([str(g) for g in groups], rotation=40, ha="right", fontsize=t["tick"])
+    ax.set_xticklabels([str(g) for g in groups], rotation=40, ha="right", fontsize=t["tick"],
+                       color=_c("text"))
     ax.set_yticks(range(len(genes)))
-    ax.set_yticklabels(genes, fontsize=t["tick"])
+    ax.set_yticklabels(genes, fontsize=t["tick"], color=_c("text"))
     ax.tick_params(length=0, colors=_c("text_sub"))
     for sp_ in ax.spines.values():
         sp_.set_visible(False)
@@ -1695,18 +1979,24 @@ def scrublet_score_distribution(adata: AnnData, *, log: bool = True, show: bool 
     between the simulated doublets' two modes; if it does not, pass one with
     ``ps.pp.scrublet(..., threshold=...)``. Cells are drawn on a log scale,
     where the few doublets would otherwise vanish beside the singlets.
+
+    Args:
+        log: Logarithmic count axis for the cells.
     """
     plt = _plt()
     t = _THEME
     info = adata.uns.get("scrublet")
     if info is None:
-        raise KeyError("run ps.pp.scrublet first")
+        from polariseq import _checks
+
+        raise _checks.InputError("scrublet_score_distribution needs adata.uns['scrublet'], which "
+                                 "ps.pp.scrublet makes; run it first.")
     batches = info.get("batches", {"all": info})
     key = info.get("batched_by")
     scores = np.asarray(adata.obs["doublet_score"], dtype=float)
     labels = np.asarray(adata.obs[key]).astype(str) if key else None
     n = len(batches)
-    fig, axes = plt.subplots(n, 2, figsize=kw.pop("figsize", (6.2, 2.1 * n + 0.5)),
+    fig, axes = _subplots(plt, n, 2, figsize=kw.pop("figsize", (6.2, 2.1 * n + 0.5)),
                              dpi=kw.pop("dpi", t["dpi"]), squeeze=False)
     top = max(float(np.nanmax(scores)),
               max(float(np.max(b["doublet_scores_sim"])) for b in batches.values()))
@@ -1716,13 +2006,14 @@ def scrublet_score_distribution(adata: AnnData, *, log: bool = True, show: bool 
         obs = obs[np.isfinite(obs)]
         sim = np.asarray(b["doublet_scores_sim"], dtype=float)
         thr = b.get("threshold")
-        for c, (vals, what, color) in enumerate(((obs, "cells", ACCENT),
-                                                 (sim, "simulated doublets", ACCENT_2))):
+        for c, (vals, what, color) in enumerate(((obs, "cells", _c("accent")),
+                                                 (sim, "simulated doublets", _c("accent_2")))):
             ax = axes[r, c]
             _apply_axes_style(ax, frame=True, grid="y")
             ax.hist(vals, bins=bins, color=color, alpha=0.85, density=True, edgecolor="none")
             if log and c == 0:
                 ax.set_yscale("log")
+                _plain_log(ax, "y")
             if thr is not None:
                 ax.axvline(thr, color=_c("text"), linewidth=0.8, linestyle=(0, (3, 2)))
             ax.tick_params(labelsize=t["tick"], colors=_c("text_sub"))
@@ -1754,22 +2045,24 @@ def highly_variable_genes(adata: AnnData, ax: Any | None = None, show: bool = Tr
 
     own = ax is None
     if own:
-        fig, ax = plt.subplots(figsize=(4.2, 2.9), dpi=t["dpi"])
+        fig, ax = _subplots(plt, figsize=(4.2, 2.9), dpi=t["dpi"])
     else:
         fig = ax.figure
     _apply_axes_style(ax, frame=True)
     ax.scatter(means[~hvg], disp[~hvg], s=3.5, color=_c("bg_soft"), alpha=0.85,
                edgecolors="none", rasterized=True)
-    ax.scatter(means[hvg], disp[hvg], s=7, color=ACCENT, alpha=0.75,
+    ax.scatter(means[hvg], disp[hvg], s=7, color=_c("accent"), alpha=0.75,
                edgecolors="none", rasterized=True)
     ax.set_xscale("log")
     ax.set_yscale("log")
+    _plain_log(ax, "x")
+    _plain_log(ax, "y")
     ax.tick_params(labelsize=t["tick"], colors=_c("text_sub"))
     h1 = mlines.Line2D([], [], marker="o", ls="", ms=3.5, color=_c("bg_soft"),
                        markeredgecolor=_c("spine"), label="other genes")
-    h2 = mlines.Line2D([], [], marker="o", ls="", ms=4.5, color=ACCENT,
+    h2 = mlines.Line2D([], [], marker="o", ls="", ms=4.5, color=_c("accent"),
                        label=f"HVGs ({int(hvg.sum()):,})")
-    ax.legend(handles=[h1, h2], frameon=False, fontsize=t["legend"],
+    _legend(ax, handles=[h1, h2], frameon=False, fontsize=t["legend"],
               loc="upper left", handletextpad=0.2, labelspacing=0.3)
     _axis_labels(ax, xlabel="mean expression", ylabel="dispersion")
     _heading(ax, kw.pop("title", "highly variable genes"),
@@ -1795,6 +2088,10 @@ def dotplot(
 
     Genes may be given as `markers=` or, for scanpy compatibility,
     `var_names=`.
+
+    Args:
+        markers: Genes to show (or ``var_names=``), one column each.
+        groupby: ``obs`` column of the groups, one row each.
     """
     markers = _resolve_markers(markers, kw, "dotplot")
     import matplotlib.cm as cm
@@ -1803,11 +2100,8 @@ def dotplot(
     t = _THEME
     split_by = kw.pop("split_by", None)
 
+    valid_markers = _present_genes(adata, markers, groupby, "dotplot")
     groups = _group_order(adata.obs[groupby])
-    valid_markers = [g for g in markers if g in list(adata.var_names)]
-    if not valid_markers:
-        raise ValueError("none of the requested markers are in var_names "
-                         "(after HVG subsetting?) — pass genes that survive filtering")
     garr = np.asarray(adata.obs[groupby])
     vals = _gene_values(adata, valid_markers)
     levels = _levels(adata.obs[split_by]) if split_by is not None else [None]
@@ -1828,25 +2122,25 @@ def dotplot(
     own = ax is None
     per_group = 0.55 if split_by is None else 0.34 * len(levels) + 0.2
     if own:
-        fig, ax = plt.subplots(figsize=kw.pop("figsize", (max(len(groups) * per_group + 1.6, 4),
+        fig, ax = _subplots(plt, figsize=kw.pop("figsize", (max(len(groups) * per_group + 1.6, 4),
                                                           max(len(valid_markers) * 0.4, 2.5) + 0.6)),
                                dpi=t["dpi"])
     else:
         fig = ax.figure
     _apply_axes_style(ax, frame=False)
 
-    cmap = kw.pop("cmap", None) or _cmap("DOT_CMAP")
+    cmap = kw.pop("cmap", None) or _role_cmap("dot")
     norm = Normalize(vmin=0, vmax=max(mean_expr.max(), 1e-9))
     if split_by is None:
         xs, ys = np.meshgrid(range(len(groups)), range(len(valid_markers)))
         ax.scatter(xs.flatten(), ys.flatten(), s=frac.flatten() * 200 + 5,
-                   c=cmap(norm(mean_expr.flatten())), edgecolors="white",
+                   c=cmap(norm(mean_expr.flatten())), edgecolors=_c("axes_bg"),
                    linewidths=0.5, zorder=3)
     else:
         # The levels side by side within each group, told apart by the
         # colour of their outline.
         from matplotlib.lines import Line2D
-        edge = [ACCENT, ACCENT_2, *categorical_palette(max(1, len(levels)))]
+        edge = [_c("accent"), _c("accent_2"), *categorical_palette(max(1, len(levels)))]
         step = 0.72 / len(levels)
         for li in range(len(levels)):
             xs = np.arange(len(groups)) + (li - (len(levels) - 1) / 2) * step
@@ -1855,17 +2149,17 @@ def dotplot(
                 ax.scatter(xs, np.full(len(groups), gi), s=frac[gi, k] * 150 + 4,
                            c=cmap(norm(mean_expr[gi, k])), edgecolors=edge[li % len(edge)],
                            linewidths=0.9, zorder=3)
-        ax.legend(handles=[Line2D([], [], marker="o", ls="", ms=5, mfc="white",
+        _legend(ax, handles=[Line2D([], [], marker="o", ls="", ms=5, mfc="white",
                                   mec=edge[i % len(edge)], mew=1.1, label=str(lev))
                            for i, lev in enumerate(levels)],
                   frameon=False, fontsize=t["legend"], ncol=len(levels), loc="lower right",
                   bbox_to_anchor=(1.0, 1.0), handletextpad=0.2, columnspacing=0.9)
     rotate = len(groups) > 8 or (split_by is not None and max(len(str(g)) for g in groups) > 6)
     ax.set_xticks(range(len(groups)))
-    ax.set_xticklabels([str(g) for g in groups], fontsize=t["tick"],
+    ax.set_xticklabels([str(g) for g in groups], fontsize=t["tick"], color=_c("text"),
                        rotation=40 if rotate else 0, ha="right" if rotate else "center")
     ax.set_yticks(range(len(valid_markers)))
-    ax.set_yticklabels(valid_markers, fontsize=t["tick"],
+    ax.set_yticklabels(valid_markers, fontsize=t["tick"], color=_c("text"),
                        fontname="DejaVu Sans Mono")
     ax.set_xlim(-0.6, len(groups) - 0.4)
     ax.set_ylim(len(valid_markers) - 0.4, -0.6)
@@ -1894,16 +2188,19 @@ def heatmap(
 
     Genes may be given as `markers=` or, for scanpy compatibility,
     `var_names=`.
+
+    Args:
+        markers: Genes to show (or ``var_names=``).
+        groupby: ``obs`` column of the groups.
+        cmap: Matplotlib colour map (default: the theme's).
     """
     markers = _resolve_markers(markers, kw, "heatmap")
     plt = _plt()
     t = _THEME
 
+    valid_markers = _present_genes(adata, markers, groupby, "heatmap")
     groups = sorted(set(np.asarray(adata.obs[groupby]).tolist()),
                     key=lambda g: (len(g), g) if isinstance(g, str) else g)
-    valid_markers = [g for g in markers if g in list(adata.var_names)]
-    if not valid_markers:
-        raise ValueError("none of the requested markers are in var_names")
     gene_indices = [list(adata.var_names).index(g) for g in valid_markers]
     garr = np.asarray(adata.obs[groupby])
 
@@ -1921,24 +2218,24 @@ def heatmap(
 
     own = ax is None
     if own:
-        fig, ax = plt.subplots(figsize=(max(len(groups) * 0.55, 3.6),
+        fig, ax = _subplots(plt, figsize=(max(len(groups) * 0.55, 3.6),
                                         max(len(valid_markers) * 0.32, 2.1)),
                                dpi=t["dpi"])
     else:
         fig = ax.figure
     _apply_axes_style(ax, frame=False)
-    im = ax.imshow(z, aspect="auto", cmap=cmap or _cmap("DIV_CMAP"), vmin=-2.5, vmax=2.5,
+    im = ax.imshow(z, aspect="auto", cmap=cmap or _role_cmap("div"), vmin=-2.5, vmax=2.5,
                    interpolation="nearest")
     ax.set_xticks(range(len(groups)))
-    ax.set_xticklabels([str(g) for g in groups], fontsize=t["tick"],
+    ax.set_xticklabels([str(g) for g in groups], fontsize=t["tick"], color=_c("text"),
                        rotation=45 if len(groups) > 8 else 0,
                        ha="right" if len(groups) > 8 else "center")
     ax.set_yticks(range(len(valid_markers)))
-    ax.set_yticklabels(valid_markers, fontsize=t["tick"],
+    ax.set_yticklabels(valid_markers, fontsize=t["tick"], color=_c("text"),
                        fontname="DejaVu Sans Mono")
     ax.set_xticks(np.arange(-0.5, len(groups)), minor=True)
     ax.set_yticks(np.arange(-0.5, len(valid_markers)), minor=True)
-    ax.grid(which="minor", color="white", linewidth=0.5)
+    ax.grid(which="minor", color=_c("axes_bg"), linewidth=0.5)
     ax.tick_params(which="both", length=0)
     cb = fig.colorbar(im, ax=ax, fraction=0.024, pad=0.03)
     cb.outline.set_visible(False)
@@ -1971,11 +2268,19 @@ def rank_genes_groups(
 
         ps.tl.rank_genes_groups(adata, groupby="leiden")
         ps.pl.rank_genes_groups(adata, n_genes=8)
+
+    Args:
+        groups: Clusters to show (default: all).
+        n_genes: Genes per cluster.
+        sharey: One y scale for every panel.
+        key: Where in ``uns`` the ranking is.
     """
     plt = _plt()
 
     if key not in adata.uns:
-        raise KeyError(
+        from polariseq import _checks
+
+        raise _checks.InputError(
             f"{key!r} not in .uns — run ps.tl.rank_genes_groups(adata, "
             f"groupby=...) first"
         )
@@ -2044,10 +2349,19 @@ def stacked_bar(
     ax: Any | None = None, show: bool = True, save: str | None = None,
     **kw,
 ) -> Any:
-    """Horizontal 100% composition bars with legend below."""
+    """Horizontal 100% composition bars with legend below.
+
+    Args:
+        groupby: ``obs`` column of the bars (for example the clusters).
+        color_by: ``obs`` column split within each bar (for example the dataset or condition).
+    """
     plt = _plt()
     t = _THEME
 
+    from polariseq import _checks
+
+    _checks.groups_column(adata, groupby, what="stacked_bar")
+    _checks.groups_column(adata, color_by, what="stacked_bar", arg="color_by")
     groups = sorted(set(np.asarray(adata.obs[groupby]).tolist()),
                     key=lambda g: (len(g), g) if isinstance(g, str) else g)
     cats = sorted(set(np.asarray(adata.obs[color_by]).tolist()))
@@ -2062,7 +2376,7 @@ def stacked_bar(
 
     own = ax is None
     if own:
-        fig, ax = plt.subplots(figsize=(4.6, max(len(groups) * 0.30, 1.5)),
+        fig, ax = _subplots(plt, figsize=(4.6, max(len(groups) * 0.30, 1.5)),
                                dpi=t["dpi"])
     else:
         fig = ax.figure
@@ -2076,13 +2390,13 @@ def stacked_bar(
         left += comp[:, ci]
     ax.set_yticks(range(len(groups)))
     ax.set_yticklabels([(str(g)[:24] + "...") if len(str(g)) > 26
-                        else str(g) for g in groups], fontsize=t["tick"])
+                        else str(g) for g in groups], fontsize=t["tick"], color=_c("text"))
     ax.set_xlim(0, 100)
     ax.tick_params(labelsize=t["tick"], colors=_c("text_sub"))
     ax.invert_yaxis()
     _axis_labels(ax, xlabel="composition (%)")
     ncol = 1 if len(cats) <= 6 else 2
-    ax.legend(frameon=False, fontsize=t["legend"],
+    _legend(ax, frameon=False, fontsize=t["legend"],
               title=kw.pop("legend_title", str(color_by)),
               title_fontsize=t["legend"],
               loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=ncol,
@@ -2105,7 +2419,7 @@ def scatter_qc(adata: AnnData, ax: Any | None = None, show: bool = True,
 
     own = ax is None
     if own:
-        fig, ax = plt.subplots(figsize=(4.2, 3.0), dpi=t["dpi"])
+        fig, ax = _subplots(plt, figsize=(4.2, 3.0), dpi=t["dpi"])
     else:
         fig = ax.figure
     _apply_axes_style(ax, frame=True)
@@ -2128,7 +2442,7 @@ def scatter_qc(adata: AnnData, ax: Any | None = None, show: bool = True,
         cb.set_label("cells per bin", fontsize=t["tick"], color=_c("text_sub"))
     else:
         ax.scatter(n_counts, n_genes, s=_auto_point_size(len(n_counts)),
-                   color=ACCENT, alpha=0.3, edgecolors="none", rasterized=True)
+                   color=_c("accent"), alpha=0.3, edgecolors="none", rasterized=True)
     _axis_labels(ax, xlabel="counts per cell", ylabel="genes per cell")
     _heading(ax, kw.pop("title", "QC overview"),
              kw.pop("subtitle",
@@ -2199,12 +2513,18 @@ def qc_distributions(adata: AnnData, keys: tuple | list = ("n_genes", "n_counts"
     right after ``calculate_qc_metrics``): they are drawn in grey under the
     kept cells, and the subtitle counts what was removed. Without it a
     threshold line sits at the edge of the data and cuts nothing.
+
+    Args:
+        keys: ``obs`` columns of per-cell metrics.
+        thresholds: Filter thresholds to mark, ``{'n_genes': 200}``.
+        before: The same metrics from before filtering, ``{key: values}``.
+        bins: Histogram bins (log-spaced).
     """
     plt = _plt()
     t = _THEME
     keys = [keys] if isinstance(keys, str) else list(keys)
     thresholds = thresholds or {}
-    fig, axes = plt.subplots(1, len(keys), figsize=figsize or (3.5 * len(keys), 2.5),
+    fig, axes = _subplots(plt, 1, len(keys), figsize=figsize or (3.5 * len(keys), 2.5),
                              dpi=dpi or t["dpi"], squeeze=False)
     axes = list(axes[0])
     n_total = n_kept = None
@@ -2234,7 +2554,7 @@ def qc_distributions(adata: AnnData, keys: tuple | list = ("n_genes", "n_counts"
             h_all, _ = np.histogram(pos_all, edges)
             ax.stairs(h_all, edges, fill=True, color=_c("bg_soft"), linewidth=0, zorder=1)
         h, _ = np.histogram(pos, edges)
-        ax.stairs(h, edges, fill=True, color=ACCENT, alpha=0.85, linewidth=0, zorder=2)
+        ax.stairs(h, edges, fill=True, color=_c("accent"), alpha=0.85, linewidth=0, zorder=2)
         if logx:
             _log_axis(ax, lo, hi, "x")
         from matplotlib.ticker import FuncFormatter
@@ -2245,20 +2565,20 @@ def qc_distributions(adata: AnnData, keys: tuple | list = ("n_genes", "n_counts"
                 fontsize=t["tick"] - 0.3, color=_c("text_sub"), va="top", ha="left")
         if key in thresholds:
             thr = float(thresholds[key])
-            ax.axvline(thr, color=ACCENT_2, linewidth=0.9, zorder=3)
+            ax.axvline(thr, color=_c("accent_2"), linewidth=0.9, zorder=3)
             below = int((a < thr).sum())
             x0 = ax.get_xlim()[0]
             if below and x0 < thr:
                 # The cells a threshold removes are a sliver of the total, too
                 # few to see as bars: shade where they lie and say how many.
-                ax.axvspan(x0, thr, color=ACCENT_2, alpha=0.07, linewidth=0, zorder=0)
+                ax.axvspan(x0, thr, color=_c("accent_2"), alpha=0.07, linewidth=0, zorder=0)
                 centre = float(np.sqrt(x0 * thr)) if logx else (x0 + thr) / 2
                 ax.text(centre, 0.62, f"{below:,} cells\nbelow {_plain(thr)}\nremoved",
                         transform=ax.get_xaxis_transform(), fontsize=t["tick"] - 0.3,
-                        color=ACCENT_2, va="center", ha="center", linespacing=1.3)
+                        color=_c("accent_2"), va="center", ha="center", linespacing=1.3)
             else:
                 ax.text(thr, 0.86, f"kept from {_plain(thr)} ", transform=ax.get_xaxis_transform(),
-                        fontsize=t["tick"] - 0.3, color=ACCENT_2, va="top", ha="right")
+                        fontsize=t["tick"] - 0.3, color=_c("accent_2"), va="top", ha="right")
         _axis_labels(ax, xlabel=_QC_LABELS.get(key, key), ylabel="cells")
     zeros = {k: int((a <= 0).sum()) for k, a in everyone.items()}
     extra = "".join(f", {z:,} with no {k}" for k, z in zeros.items() if z)
@@ -2282,17 +2602,25 @@ def cluster_sizes(adata: AnnData, key: str = "leiden", *, log: bool | None = Non
                   dpi: int | None = None, **kw) -> Any:
     """Cells per cluster, largest first. The axis turns logarithmic when sizes
     span more than fifty-fold, and cluster names are written out only while
-    they fit (at most 40); labels are plain numbers at every scale."""
+    they fit (at most 40); labels are plain numbers at every scale.
+
+    Args:
+        key: ``obs`` column of the clusters.
+        log: Logarithmic count axis; ``None`` chooses it when sizes span widely.
+    """
     plt = _plt()
     from matplotlib.ticker import FuncFormatter
     t = _THEME
+    from polariseq import _checks
+
+    _checks.groups_column(adata, key, what="cluster_sizes", arg="key")
     sizes = pd.Series(np.asarray(adata.obs[key])).value_counts()
     k, n = len(sizes), int(sizes.sum())
-    fig, ax = plt.subplots(figsize=figsize or (min(9.0, max(4.2, 2.8 + 0.035 * k)), 2.6),
+    fig, ax = _subplots(plt, figsize=figsize or (min(9.0, max(4.2, 2.8 + 0.035 * k)), 2.6),
                            dpi=dpi or t["dpi"])
     _apply_axes_style(ax, frame=True, grid="y")
     x = np.arange(k)
-    ax.bar(x, sizes.to_numpy(), width=0.86 if k <= 60 else 1.0, color=ACCENT, alpha=0.85,
+    ax.bar(x, sizes.to_numpy(), width=0.86 if k <= 60 else 1.0, color=_c("accent"), alpha=0.85,
            edgecolor="none")
     if log if log is not None else sizes.max() / max(sizes.min(), 1) > 50:
         _log_axis(ax, float(max(sizes.min(), 1)), float(sizes.max()), "y")
@@ -2301,7 +2629,7 @@ def cluster_sizes(adata: AnnData, key: str = "leiden", *, log: bool | None = Non
     if k <= MAX_LEGEND:
         ax.set_xticks(x)
         ax.set_xticklabels([str(c) for c in sizes.index], fontsize=t["tick"] - 0.5,
-                           rotation=90 if k > 15 else 0)
+                           rotation=90 if k > 15 else 0, color=_c("text_sub"))
         _axis_labels(ax, xlabel=key, ylabel="cells")
     else:
         ax.set_xticks([])
@@ -2325,7 +2653,14 @@ def overview_data(adata: AnnData, *, cluster_key: str = "leiden", qc_before: dic
     ``qc``: for each metric, the bin edges (evenly spaced on a log scale, as drawn), the number of cells
     in each bin before filtering (when ``qc_before`` is given) and among the cells kept, the threshold
     and how many cells fall below it; ``cluster_sizes``; ``pca_variance_ratio``; and the number of
-    cells in the embedding. Written next to the figures as ``figure_data.json``."""
+    cells in the embedding. Written next to the figures as ``figure_data.json``.
+
+    Args:
+        cluster_key: ``obs`` column of the clusters.
+        qc_before: Per-cell metrics from before filtering.
+        thresholds: Filter thresholds, ``{'n_genes': 200}``.
+        bins: Histogram bins (log-spaced).
+    """
     thresholds = thresholds or {}
     data: dict = {"n_cells": int(adata.n_obs), "qc": {}}
     for key in [k for k in ("n_genes", "n_counts") if k in adata.obs]:
@@ -2369,7 +2704,19 @@ def overview(adata: AnnData, out: str, *, cluster_key: str = "leiden",
     :func:`qc_distributions`), so the cells a threshold removed are shown.
     Also writes ``figure_data.json``, the numbers behind the quality-control, cluster-size and
     variance plots (:func:`overview_data`). Returns ``{figure: path}`` for the figures that could
-    be drawn."""
+    be drawn.
+
+    Args:
+        out: Folder the figures are written to (created if missing).
+        cluster_key: ``obs`` column of the clusters.
+        color_by: Further ``obs`` columns to colour the UMAP by, one figure each.
+        thresholds: Filter thresholds to mark, ``{'n_genes': 200}``.
+        qc_before: Per-cell metrics from before filtering, to show what was removed.
+        prefix: Text put before each file name.
+
+    Returns:
+        ``{figure: path}`` for each figure written.
+    """
     import os
 
     plt = _plt()
@@ -2411,3 +2758,63 @@ __all__ = [
     "set_theme", "get_theme", "categorical_palette",
     "VEGA_20_SCANPY", "CATEGORICAL_PALETTE",
 ]
+
+
+def compare_analyses(analyses: dict, key: str = "leiden", *, basis: str = "X_umap",
+                     ncols: int | None = None, figsize: tuple | None = None, dpi: int | None = None,
+                     show: bool = True, save: str | None = None, **kw: Any) -> Any:
+    """Each analysis's clusters side by side, on one embedding.
+
+    The cells are placed where the first analysis holding ``basis`` places them
+    (matched by name), so the panels differ only by how each analysis grouped
+    the same cells; each title gives the analysis's clusters and its adjusted
+    Rand index with the first analysis.
+
+    Args:
+        analyses: ``{name: analysis}``, as for ``ps.tl.compare_analyses``.
+        key: The ``obs`` column of clusters in each.
+        basis: The embedding the cells are placed by.
+    """
+    from polariseq import AnnData, _checks
+    from polariseq._analyses import ari
+
+    if not isinstance(analyses, dict) or len(analyses) < 2:
+        raise ValueError("compare_analyses takes two analyses or more, as a dict {name: analysis}")
+    names = list(analyses)
+    base_name = next((n for n in names if basis in analyses[n].obsm), None)
+    if base_name is None:
+        _checks.result(analyses[names[0]], basis, what="the comparison plot", where="obsm",
+                       made_by=_checks.made_by(basis))
+    base = analyses[base_name]
+    for name in names:
+        _checks.groups_column(analyses[name], key, what=f"the comparison plot ({name!r})", arg="key")
+    cells = list(map(str, base.obs_names))
+    shared = set(cells)
+    for a in analyses.values():
+        shared &= set(map(str, a.obs_names))
+    keep = np.array([c in shared for c in cells])
+    coords = np.asarray(base.obsm[basis])[keep]
+    order = [c for c in cells if c in shared]
+
+    def labels_of(a: Any) -> np.ndarray:
+        pos = {c: i for i, c in enumerate(map(str, a.obs_names))}
+        return np.asarray(a.obs[key]).astype(str)[[pos[c] for c in order]]
+
+    first = labels_of(analyses[names[0]])
+    plt = _plt()
+    fig, axes = _panel_grid(len(names), ncols, figsize, dpi, aspect=_data_aspect(coords))
+    for ax, name in zip(axes, names, strict=False):
+        lab = labels_of(analyses[name])
+        view = AnnData(X=np.zeros((len(order), 1), dtype=np.float32),
+                       obs={key: pd.Categorical(lab, categories=sorted(set(lab), key=_label_key))},
+                       obs_names=order)
+        view.obsm[basis] = coords
+        note = "" if name == names[0] else f", ARI {ari(first, lab):.2f} with {names[0]}"
+        _embedding(view, basis, key, ax=ax, show=False, title=str(name),
+                   subtitle=f"{len(set(lab))} clusters{note}", **kw)
+    fig.tight_layout()
+    _save(fig, save, dpi)
+    if show:
+        plt.show()
+    return axes
+

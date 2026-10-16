@@ -24,8 +24,9 @@ import pandas as pd
 
 def _categorical(adata: Any, groupby: str) -> pd.Categorical:
     """``obs[groupby]`` as a categorical with string categories, without a Python object per cell."""
-    if groupby not in adata.obs:
-        raise KeyError(f"{groupby!r} is not a column of obs; available: {sorted(adata.obs)}")
+    from polariseq import _checks
+
+    _checks.groups_column(adata, groupby, what="cluster curation")
     col = adata.obs[groupby]
     if isinstance(col, pd.Series):
         col = col.array
@@ -39,14 +40,17 @@ def _record(adata: Any, step: dict) -> None:
 
 def _store(adata: Any, key: str, codes: np.ndarray, categories: list[str]) -> None:
     """Write a label column, dropping categories no cell carries."""
+    from polariseq import _derived
+
     cat = pd.Categorical.from_codes(np.asarray(codes, dtype=np.int64), categories=categories)
     adata.obs[key] = cat.remove_unused_categories()
+    _derived(adata, key)
 
 
 def _check_groups(cat: pd.Categorical, wanted: list[str], groupby: str) -> None:
-    unknown = [g for g in wanted if g not in set(cat.categories)]
-    if unknown:
-        raise KeyError(f"{unknown} not in obs[{groupby!r}]; available: {list(cat.categories)}")
+    from polariseq import _checks
+
+    _checks.values_in(wanted, cat.categories, what="cluster curation", column=f"obs[{groupby!r}]")
 
 
 def annotate(adata: Any, mapping: dict, groupby: str = "leiden", *, key_added: str = "cell_type",
@@ -228,7 +232,9 @@ def markers(adata: Any, n: int = 10, *, groups: list | None = None, wide: bool =
     """
     res = adata.uns.get("rank_genes_groups")
     if not res:
-        raise KeyError("no markers stored; run ps.tl.rank_genes_groups first")
+        from polariseq import _checks
+
+        raise _checks.InputError("no markers stored: run ps.tl.rank_genes_groups first")
     keys = list(res) if groups is None else [str(g) for g in groups]
     unknown = [k for k in keys if k not in res]
     if unknown:

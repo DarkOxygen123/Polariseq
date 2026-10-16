@@ -62,12 +62,42 @@ class TestThemes:
         assert dark["axes_bg"] != light["axes_bg"]
 
     def test_palette_follows_the_theme(self) -> None:
-        """`print` washes nothing, `dark` washes less than `paper`."""
+        """Light themes share the validated palette, `dark` takes its dark steps,
+        `classic` is the 0.2.0 palette (Tol colours washed toward grey)."""
         ps.pl.set_theme("paper")
-        paper = ps.pl.categorical_palette(4)
+        paper = ps.pl.categorical_palette(8)
+        assert paper == plmod.PALETTE_LIGHT
         ps.pl.set_theme("print")
-        printed = ps.pl.categorical_palette(4)
-        assert paper != printed
+        assert ps.pl.categorical_palette(8) == paper
+        ps.pl.set_theme("dark")
+        assert ps.pl.categorical_palette(8) == plmod.PALETTE_DARK
+        ps.pl.set_theme("classic")
+        assert ps.pl.categorical_palette(4) == [plmod._wash(c) for c in plmod._TOL_RAW[:4]]
+
+    def test_more_groups_than_hues_take_lighter_then_darker_steps(self) -> None:
+        pal = ps.pl.categorical_palette(24)
+        assert len(set(pal)) == 24 and pal[:8] == plmod.PALETTE_LIGHT
+
+    def test_text_is_legible_on_every_theme(self) -> None:
+        """Secondary and caption text reach WCAG 4.5:1 for small type on each background."""
+        def lum(h):
+            c = [int(h[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+            c = [x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4 for x in c]
+            return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+
+        for name in (n for n in ps.pl.THEMES if n != "classic"):
+            ps.pl.set_theme(name)
+            bg = lum(plmod._c("figure_bg"))
+            for key in ("text", "text_sub", "text_cap"):
+                fg = lum(plmod._c(key))
+                ratio = (max(fg, bg) + 0.05) / (min(fg, bg) + 0.05)
+                assert ratio >= 4.5, (name, key, ratio)
+
+    def test_figures_grow_with_the_type(self) -> None:
+        ps.pl.set_theme("talk")
+        fig, _ = plmod._subplots(plmod._plt(), figsize=(4.0, 3.0))
+        assert fig.get_size_inches()[0] == pytest.approx(4.0 * 13.0 / 8.5)
+        plmod._plt().close(fig)
 
     def test_switching_does_not_accumulate_overrides(self) -> None:
         ps.pl.set_theme("talk")
@@ -125,7 +155,7 @@ class TestEmbeddings:
                        show=False)
 
     def test_unknown_colour_is_a_clear_error(self, adata) -> None:
-        with pytest.raises(KeyError, match="neither a column of .obs"):
+        with pytest.raises(KeyError, match="neither a column of adata.obs"):
             ps.pl.umap(adata, color="definitely-not-a-gene", show=False)
 
     def test_generic_embedding_accepts_a_short_basis(self, adata) -> None:
@@ -240,3 +270,81 @@ def test_many_clusters_stay_categorical():
     colours = {tuple(c) for coll in ax.collections
                for c in coll.get_facecolors()}
     assert len(colours) > 2, f"expected many cluster colours, got {len(colours)}"
+
+
+class TestThemedText:
+    """Every text a plot draws takes the theme's colours (dark legends were black)."""
+
+    def _texts(self, fig):
+        out = []
+        for ax in fig.axes:
+            leg = ax.get_legend()
+            if leg is not None:
+                out += [t.get_color() for t in leg.get_texts()]
+            out += [t.get_color() for t in ax.get_xticklabels() + ax.get_yticklabels() if t.get_text()]
+        return out
+
+    def test_dark_legends_and_tick_labels_are_light(self, adata) -> None:
+        import matplotlib.colors as mc
+
+        ps.pl.set_theme("dark")
+        adata.obs["half"] = np.where(np.arange(adata.n_obs) % 2, "a", "b").astype(object)
+        for draw in (lambda: ps.pl.umap(adata, color="half", show=False),
+                     lambda: ps.pl.dotplot(adata, list(adata.var_names[:3]), show=False),
+                     lambda: ps.pl.heatmap(adata, list(adata.var_names[:3]), show=False)):
+            ax = draw()
+            fig = (ax[0] if isinstance(ax, (list, np.ndarray)) else ax).figure
+            colours = self._texts(fig)
+            assert colours, "nothing to check"
+            assert all(sum(mc.to_rgb(c)) / 3 > 0.5 for c in colours), colours
+            plmod._plt().close(fig)
+
+
+class TestLabels:
+    def test_on_data_names_the_groups(self, adata) -> None:
+        adata.obs["half"] = np.where(np.arange(adata.n_obs) % 2, "first", "second").astype(object)
+        ax = ps.pl.umap(adata, color="half", legend_loc="on data", show=False)
+        assert ax.get_legend() is None
+        assert {"first", "second"} <= {t.get_text() for t in ax.texts}
+        plmod._plt().close(ax.figure)
+
+    def test_many_clusters_are_numbered_with_their_own_labels(self, adata) -> None:
+        assert adata.obs["leiden"].max() >= 8, "the fixture needs more clusters than hues"
+        ax = ps.pl.umap(adata, color="leiden", show=False)
+        drawn = {t.get_text() for t in ax.texts}
+        assert drawn <= {str(c) for c in np.unique(adata.obs["leiden"])} and len(drawn) > 8
+        plmod._plt().close(ax.figure)
+
+    def test_classic_keeps_the_legend(self, adata) -> None:
+        ps.pl.set_theme("classic")
+        ax = ps.pl.umap(adata, color="leiden", show=False)
+        assert ax.get_legend() is not None and not ax.texts
+        plmod._plt().close(ax.figure)
+
+
+class TestLayout:
+    def test_a_top_y_label_lifts_the_heading_above_it(self, adata) -> None:
+        ps.pl.set_theme("talk")
+        ax = ps.pl.highly_variable_genes(adata, show=False)
+        fig = ax.figure
+        fig.canvas.draw()
+        r = fig.canvas.get_renderer()
+        label = ax.yaxis.label.get_window_extent(r)
+        sub = ax._ps_subtitle.get_window_extent(r)
+        assert sub.y0 >= label.y1 - 1   # the subtitle sits above the label, not on it
+        plmod._plt().close(fig)
+
+    def test_panels_line_up(self, adata) -> None:
+        axes = ps.pl.umap(adata, color=["leiden", str(adata.var_names[0])], show=False)
+        fig = axes[0].figure
+        fig.canvas.draw()
+        tops = [a.get_position().y1 for a in axes]
+        assert max(tops) - min(tops) < 1e-6
+        plmod._plt().close(fig)
+
+    def test_log_axes_read_as_plain_numbers(self, adata) -> None:
+        ax = ps.pl.highly_variable_genes(adata, show=False)
+        ax.figure.canvas.draw()
+        labels = [t.get_text() for t in ax.get_xticklabels() if t.get_text()]
+        assert labels and not any("10^" in s or "times" in s for s in labels), labels
+        plmod._plt().close(ax.figure)

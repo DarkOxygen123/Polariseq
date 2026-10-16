@@ -207,6 +207,10 @@ pub struct DiskPipelineOptions {
     pub renormalize: Option<f32>,
     /// Standardize each gene before PCA (scanpy's `pp.scale`, never formed).
     pub scale_pcs: bool,
+    /// Genes kept whatever the ranking chooses, as `(column, name)`: added to
+    /// the top `n_hvg` (past the detection floor). One the `min_cells` filter
+    /// removes is an error, named, before the selection runs.
+    pub include: Vec<(usize, String)>,
 }
 
 impl Default for DiskPipelineOptions {
@@ -228,6 +232,7 @@ impl Default for DiskPipelineOptions {
             hvg_floor_frac: 0.0,
             renormalize: None,
             scale_pcs: false,
+            include: Vec::new(),
         }
     }
 }
@@ -368,9 +373,24 @@ pub fn disk_backed_preprocess(
         let n_cells_kept = qc_metrics_blocks(&FilteredRows::new(&db, &keep), None).gene_n_cells;
         let mask: Vec<bool> = n_cells_kept.iter().map(|&n| n >= opts.min_cells).collect();
         if !mask.iter().any(|&k| k) {
-            return Err(IoError::InvalidLayout(format!(
+            return Err(IoError::Rejected(format!(
                 "min_cells={} removes every gene",
                 opts.min_cells
+            )));
+        }
+        let dropped: Vec<String> = opts
+            .include
+            .iter()
+            .filter(|(g, _)| !mask[*g])
+            .map(|(g, name)| format!("{name} ({} cells)", n_cells_kept[*g]))
+            .collect();
+        if !dropped.is_empty() {
+            return Err(IoError::Rejected(format!(
+                "the genes asked for with include are detected in fewer kept cells than \
+                 min_cells={}, so the gene filter removes them: {}. Lower min_cells, or leave \
+                 them out of include",
+                opts.min_cells,
+                dropped.join(", ")
             )));
         }
         phase!("filter_genes");
@@ -444,6 +464,14 @@ pub fn disk_backed_preprocess(
         }
     };
     phase!("hvg_seurat");
+    // Genes asked for are added to the ranking's choice.
+    let mut hvg = hvg;
+    for (g, _) in &opts.include {
+        if !hvg.mask[*g] {
+            hvg.mask[*g] = true;
+            hvg.n_hvg += 1;
+        }
+    }
 
     // 5. Subset to the HVGs — a second, much smaller spill of the *raw*
     //    counts — then PCA through the same view. Normalisation uses the

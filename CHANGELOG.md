@@ -1,5 +1,76 @@
 # Changelog
 
+## 0.2.1 (2026-10-17)
+
+- **Saved analyses.** `adata.save(name)` keeps an analysis in the project folder
+  (`states/<name>/`) and `ps.load(project, name)` opens it again where it stopped. The counts are
+  pointed to, not copied: out of core the on-disk copy is reopened with the cells, genes and
+  normalization the steps left; in memory the matrix is rebuilt from the source files by the same
+  steps, identical to the last bit (checked at save and at load). Results the project holds are hard
+  links. A moved source file stops the load with `ps.SourceMovedError`, naming where it was expected
+  (`relink=` gives its new place); paths inside the project are kept relative, so a project moved
+  with its data keeps loading. The format is typed JSON plus `.npy` files: loading runs no code.
+- **Several analyses of one dataset.** `adata.from_counts(name)` starts a new analysis of the same cells
+  from their raw counts (out of core a new view of the same on-disk copy, nothing copied; in memory the
+  cells read again from the source files), keeping the cells' own annotations (quality metrics, doublet
+  scores, columns you added) and leaving what the first analysis derived (clusters, scores, labels,
+  embeddings). Each analysis keeps its results in `runs/<dataset>/analyses/<name>/`, so analyses never
+  replace each other's files; run with the same settings, a new analysis reproduces the first exactly.
+- **Comparing analyses.** `ps.tl.compare_analyses({name: analysis, ...}, labels=..., seeds=...)` measures
+  how far analyses of the same cells agree: adjusted Rand index and normalized mutual information for
+  every pair, which cluster became which (cells and top markers shared), agreement with given labels,
+  and, with `seeds`, each analysis's agreement with itself under other seeds, the run-to-run variation a
+  difference between settings should exceed. `ps.pl.compare_analyses` draws each analysis's clusters
+  side by side on one embedding.
+- **Documentation.** `docs/API.md` lists every public function with its arguments, their types,
+  defaults and meaning, and what it returns, written from the code (`python -m polariseq._api_reference`;
+  a test fails when it falls behind or an argument is undescribed). `notebooks/02_every_command.ipynb`
+  runs every command once on PBMC 3k; `examples/07_settings_saving_exporting.py` shows several analyses
+  with different settings, their agreement, saving, reopening and export. Arguments that had no
+  description in `help()` now have one (`tl.leiden`, `get.pseudobulk`, the plots, ...).
+- **Plots: a validated palette, dark mode done properly, and nothing collides.** The group palette
+  is eight hues checked as a set for each surface (lightness band, colour strength, colour-blind and
+  normal-vision separation of neighbours, contrast), with steps of its own for dark backgrounds;
+  0.2.0's had a grey slot that read as "no group", red and pink side by side, and a navy that
+  vanished on dark. Past eight groups the hues repeat lighter, then darker, and the groups are
+  numbered on the plot (a cluster keeps its own number). Values take a one-hue blue scale whose low
+  end stays visible, signed values blue to red through grey, each with a dark version where low
+  values recede instead of glaring white. Grey text reaches 4.5:1 on every background. Fixed:
+  legends and gene or group names drawn black on the dark theme; `legend_loc="on data"` drawing no
+  names (they are now placed so none overlaps another); y-axis labels colliding with subtitles;
+  ticks colliding in the notebook and talk themes (figures now grow with the type); panels of a
+  multi-panel embedding at different heights; log axes reading 6x10^0; violin names overlapping and
+  only the first panel labelled; "not tested" and "no change" sharing white in `fold_changes`
+  (untested cells are hatched). `ps.pl.set_theme("classic")` keeps 0.2.0's look; the scripts of the
+  paper's and the README's figures pin it.
+- **Numbered groups in numeric order in plots** (clusters "0" to "20" read 0, 1, 2, ... 10, not 0, 1,
+  10, ...), also when the labels are text, as after an export or a load.
+- **`adata.write_h5ad(path)`** writes the anndata format natively (no `anndata` package needed): X as
+  the analysis left it (normalized, selected genes), streamed from the on-disk copy out of core, and
+  every annotation, embedding, graph and result with Scanpy's conventions. `uns['polariseq']` points to
+  the source files and records which of their cells and genes the file holds and the steps that made X;
+  `counts=True` also writes the raw counts as `layers['counts']`. Written under a temporary name and
+  renamed when complete.
+- **Genes of your own in the gene selection.** `ps.pp.highly_variable_genes(..., include=[...])` (and
+  `process_diskbacked(include=...)`) keeps the genes named whatever the ranking chooses: those not among
+  the top `n_top_genes` are added (past the detection floor), so renormalization and PCA run on them too.
+  `var['included']` marks them and `uns['hvg']` records the request. A name not in the data is an error
+  saying, per gene, whether it is absent or was removed by an earlier step, with the closest names; one
+  detected in very few cells is kept with a warning.
+- **Errors that say what is wrong and what to do.** A misspelled column, gene, group or embedding names
+  the closest match and what exists; a step run before the one it needs names that step (`neighbors`
+  before `pca`, `leiden` before `neighbors`, ...); a missing, folder or non-HDF5 input says what is there
+  and which reader fits; impossible values (`set_budget(threads=0)`, `pca` with more components than the
+  data allow, a `dpt` root that is not a cell) are refused with the limit. Some mistakes passed silently
+  before and are now errors: unknown groups in `rank_genes_groups(groups=...)` and `pl.volcano`, and
+  non-positive budgets; genes missing from `score_genes` or `pl.dotplot` are named in a warning. Missing
+  names raise `KeyError` as before, printed as a plain sentence.
+- **Export after Scrublet.** `to_anndata()` hands memory-mapped results (the simulated doublets'
+  scores, kept in the project) to anndata as plain arrays, so `write_h5ad` works.
+- **Gene selection with `subset=True` records the genes it keeps**, as the gene filter does. Before,
+  steps that read the raw counts back from the files after it (`compare_conditions`,
+  `get.pseudobulk` on a normalized matrix in memory) took the genes before the selection.
+
 ## 0.2.0 (2026-10-16)
 
 **Licence.** From 0.2.0, Polariseq is released under the PolyForm Noncommercial License 1.0.0 with
