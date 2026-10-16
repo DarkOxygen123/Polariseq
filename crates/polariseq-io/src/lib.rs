@@ -97,6 +97,10 @@ pub enum IoError {
     /// An IO error (file creation, write).
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    /// The arguments ask for something the data cannot give (a gene a filter
+    /// removes, a filter that removes everything); the message says what and why.
+    #[error("{0}")]
+    Rejected(String),
     /// The file does not match the expected anndata layout.
     #[error("invalid anndata layout: {0}")]
     InvalidLayout(String),

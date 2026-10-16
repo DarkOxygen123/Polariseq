@@ -82,6 +82,20 @@ def test_memory_and_out_of_core_agree_and_results_are_mapped(path, proj):
     assert float(np.load(score.filename, mmap_mode="r")[0]) == first
 
 
+def test_scored_result_exports_and_writes_with_a_project(path, proj, tmp_path):
+    """The simulated doublets' scores are memory-mapped in a project; the export must still be writable."""
+    a = ps.read_h5ad(path, mode="memory", name="export")
+    ps.pp.scrublet(a, batch_key="lane")
+    assert isinstance(a.uns["scrublet"]["batches"]["lane1"]["doublet_scores_sim"], np.memmap)
+    out = a.to_anndata()
+    assert not isinstance(out.uns["scrublet"]["batches"]["lane1"]["doublet_scores_sim"], np.memmap)
+    out.write_h5ad(tmp_path / "scored.h5ad")
+    back = ad.read_h5ad(tmp_path / "scored.h5ad")
+    np.testing.assert_array_equal(back.uns["scrublet"]["batches"]["lane1"]["doublet_scores_sim"],
+                                  np.asarray(a.uns["scrublet"]["batches"]["lane1"]["doublet_scores_sim"]))
+    np.testing.assert_array_equal(back.obs["doublet_score"].to_numpy(), np.asarray(a.obs["doublet_score"]))
+
+
 def test_each_batch_is_scored_alone(path):
     a = ps.read_h5ad(path, mode="memory")
     ps.pp.scrublet(a, batch_key="lane")

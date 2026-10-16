@@ -320,6 +320,55 @@ impl PyDiskMatrix {
         (self.scale.is_some(), self.log1p)
     }
 
+    /// The `normalize_total` scale, one factor per file row (`None` before any).
+    fn scale_factors<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f32>>> {
+        self.scale.clone().map(|s| s.into_pyarray(py))
+    }
+
+    /// Set the view a saved analysis recorded (`row_mask`, `col_mask`,
+    /// `scale_factors` and the log flag of `transforms`), all indexed by the
+    /// file's rows and columns, in place of the current one.
+    #[pyo3(signature = (row_keep, col_keep, scale, log1p))]
+    fn restore_view(
+        &mut self,
+        row_keep: PyReadonlyArray1<'_, bool>,
+        col_keep: PyReadonlyArray1<'_, bool>,
+        scale: Option<PyReadonlyArray1<'_, f32>>,
+        log1p: bool,
+    ) -> PyResult<()> {
+        let (rows, cols) = (row_keep.as_slice()?, col_keep.as_slice()?);
+        if rows.len() != self.csr.nrows || cols.len() != self.csr.ncols {
+            return Err(PyValueError::new_err(format!(
+                "a view of {} x {} for a store of {} x {}",
+                rows.len(),
+                cols.len(),
+                self.csr.nrows,
+                self.csr.ncols
+            )));
+        }
+        let scale = match scale {
+            Some(s) => {
+                let s = s.as_slice()?;
+                if s.len() != self.csr.nrows {
+                    return Err(PyValueError::new_err(format!(
+                        "{} scale factors for {} rows",
+                        s.len(),
+                        self.csr.nrows
+                    )));
+                }
+                Some(s.to_vec())
+            }
+            None => None,
+        };
+        self.row_keep = rows.to_vec();
+        self.col_keep = cols.to_vec();
+        self.n_rows_kept = rows.iter().filter(|&&k| k).count();
+        self.n_cols_kept = cols.iter().filter(|&&k| k).count();
+        self.scale = scale;
+        self.log1p = log1p;
+        Ok(())
+    }
+
     /// Keep only the current rows where `mask` is true (a view; the store is
     /// not rewritten). Returns the number of rows kept.
     fn retain_rows_mask(&mut self, mask: PyReadonlyArray1<'_, bool>) -> PyResult<usize> {

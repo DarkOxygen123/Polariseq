@@ -1,6 +1,6 @@
 # Examples
 
-Six scripts, in order. Each one starts with a settings block (input file,
+Seven scripts, in order. Each one starts with a settings block (input file,
 output folder, memory, threads): set your paths there, save, and run it from
 any folder.
 
@@ -12,6 +12,7 @@ any folder.
 | `04_plotting.py` | every plot type, themes and multi-panel figures | PBMC 3k or your own file |
 | `05_comparing_conditions.py` | control against treated: two runs read as one, doublets, integration and a per-cell-type comparison with donors as replicates | Kang et al. 2018 from GEO (about 60 MB, once); needs `pip install anndata` |
 | `06_large_run.py` | one large dataset (one file or many) end to end, with a run report | your files; with none it runs on the small test file |
+| `07_settings_saving_exporting.py` | several analyses of the same cells with different settings (`from_counts`, genes of your own with `include=`), how far they agree (`compare_analyses`), saving and reopening (`save`, `ps.load`), and an `.h5ad` for other tools (`write_h5ad`) | PBMC 3k or your own file |
 
 ```bash
 git clone https://github.com/DarkOxygen123/Polariseq.git polariseq
@@ -23,6 +24,7 @@ python examples/03_large_data_out_of_core.py /path/to/your.h5ad
 python examples/04_plotting.py
 python examples/05_comparing_conditions.py
 python examples/06_large_run.py
+python examples/07_settings_saving_exporting.py
 ```
 
 Figures go to `examples/output/`, downloads to `examples/data/`.

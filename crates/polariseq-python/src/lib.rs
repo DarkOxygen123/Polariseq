@@ -39,6 +39,7 @@ mod disk;
 mod doublets;
 mod frame;
 mod sparse;
+mod writer;
 
 use numpy::{
     IntoPyArray, PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray2, PyReadwriteArray1,
@@ -882,7 +883,7 @@ fn harmony_correct<'py>(
 #[pyo3(signature = (path, spill_dir, n_hvg=2000, n_pcs=50, target_sum=1e4, seed=0, block_rows=0,
                     min_genes=0, max_genes=None, min_counts=0.0, max_counts=None,
                     max_pct_mt=None, mito=None, min_cells=0, hvg_floor_frac=0.0,
-                    renormalize=None, scale_pcs=false))]
+                    renormalize=None, scale_pcs=false, include=Vec::new()))]
 #[allow(clippy::too_many_arguments)]
 fn disk_backed_preprocess<'py>(
     py: Python<'py>,
@@ -903,6 +904,7 @@ fn disk_backed_preprocess<'py>(
     hvg_floor_frac: f32,
     renormalize: Option<f32>,
     scale_pcs: bool,
+    include: Vec<(usize, String)>,
 ) -> PyResult<Bound<'py, PyDict>> {
     let mito: Option<Vec<bool>> = match mito {
         Some(m) => Some(m.as_slice()?.to_vec()),
@@ -931,10 +933,14 @@ fn disk_backed_preprocess<'py>(
         hvg_floor_frac,
         renormalize,
         scale_pcs,
+        include,
     };
     let r = py
         .detach(|| polariseq_io::spill::disk_backed_preprocess(path, &opts))
-        .map_err(|e| PyRuntimeError::new_err(format!("disk-backed preprocessing failed: {e}")))?;
+        .map_err(|e| match e {
+            polariseq_io::IoError::Rejected(msg) => PyValueError::new_err(msg),
+            e => PyRuntimeError::new_err(format!("disk-backed preprocessing failed: {e}")),
+        })?;
 
     let dict = PyDict::new(py);
     let emb = flat_to_pyarray2(py, r.embedding, r.n_rows, r.n_components)?;
@@ -1538,6 +1544,7 @@ fn streaming_cluster_stats_normalized<'py>(
 fn _polariseq(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySparseMatrix>()?;
     m.add_class::<disk::PyDiskMatrix>()?;
+    m.add_class::<writer::PyH5Writer>()?;
     m.add_function(wrap_pyfunction!(triple, m)?)?;
     m.add_function(wrap_pyfunction!(core_version, m)?)?;
     m.add_function(wrap_pyfunction!(set_threads, m)?)?;

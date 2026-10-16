@@ -422,7 +422,18 @@ class Budget:
         spill_gb: float | None = None,
         allow_lossy: bool | None = None,
     ) -> Budget:
-        """A copy with the given fields replaced; the rest stays detected."""
+        """A copy with the given fields replaced; the rest stays detected.
+
+        Args:
+            ram_gb: Memory ceiling, in GB.
+            threads: Worker threads.
+            spill_dir: Folder for out-of-core scratch files.
+            spill_gb: Ceiling for those files, in GB.
+            allow_lossy: Let the planner trade accuracy for fit (off by default).
+
+        Returns:
+            A new budget; the fields left as ``None`` keep their values.
+        """
         changes: dict[str, Any] = {}
         if ram_gb is not None:
             changes["ram_bytes"] = int(ram_gb * _GB)

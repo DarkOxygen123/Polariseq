@@ -32,6 +32,7 @@ from polariseq._frame import read_frame as _read_frame
 from polariseq._frame import take as _take
 from polariseq._polariseq import (
     DiskMatrix,
+    H5Writer,  # noqa: F401  (the writer of write_h5ad, polariseq._h5ad)
     SparseMatrix,
     core_version,
     fast_community,
@@ -79,6 +80,7 @@ from polariseq._polariseq import (
 from polariseq._project import Project, ProjectNotSet, project
 from polariseq._project import current as _current_project
 from polariseq._project import require as _require_project
+from polariseq._state import SourceMovedError
 from polariseq.planning import estimate as _estimate
 from polariseq.planning import max_cells as _max_cells
 from polariseq.resources import Budget, Resources, detect_resources
@@ -97,6 +99,8 @@ __all__ = [
     "plan",
     "max_cells",
     "read_h5ad",
+    "load",
+    "SourceMovedError",
     "project",
     "Project",
     "ProjectNotSet",
@@ -110,7 +114,7 @@ __all__ = [
     "triple",
 ]
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 # The active budget: what Polariseq may use. Detected from the machine on
 # first use and overridable with `set_budget`. Detection is lazy so that
@@ -169,6 +173,9 @@ def set_workflow(name: str) -> None:
     rounds up to 10,000 cells, else 200. Use it to compare with Scanpy step for step.
 
     An argument given explicitly always wins over the workflow.
+
+    Args:
+        name: ``'polariseq'`` (default) or ``'scanpy'``.
     """
     global _WORKFLOW
     if name not in WORKFLOWS:
@@ -226,6 +233,11 @@ def set_budget(
         The new active budget.
     """
     global _BUDGET
+    from polariseq import _checks
+
+    for arg, value, whole in (("ram_gb", ram_gb, False), ("threads", threads, True),
+                              ("spill_gb", spill_gb, False)):
+        _checks.positive(arg, value, what="set_budget", integer=whole)
     # Not `budget()`: on first use that detects the machine *and* sizes the
     # worker pool from the detected cores, after which the pool cannot take
     # the thread count asked for here.
@@ -290,8 +302,10 @@ def plan(
         step, and whether it fits; for several datasets, each one's shape and
         the genes it keeps in ``datasets``.
     """
+    from polariseq import _checks
+
     if isinstance(path, (str, os.PathLike)):
-        meta = scan_h5ad_meta(os.fspath(path))
+        meta = scan_h5ad_meta(_checks.input_file(path, what="plan"))
         shape = (int(meta["n_cells"]), int(meta["n_genes"]), int(meta["nnz"]))
         datasets: list[dict[str, Any]] = []
     else:
@@ -346,6 +360,17 @@ def max_cells(
 
         >>> ps.max_cells()                      # in RAM on this machine
         >>> ps.max_cells(storage="spill")       # streamed from SSD
+
+    Args:
+        n_genes: Genes in the dataset.
+        nnz_per_cell: Stored (non-zero) values per cell, the density of the data.
+        storage: ``None`` (the planner chooses), ``'ram'``, ``'compressed'`` or ``'spill'`` (out of
+            core).
+        **kwargs: Pipeline settings that change the cost, as for :func:`plan` (``n_hvg``, ``n_pcs``,
+            ``n_neighbors``, ``with_umap``).
+
+    Returns:
+        The largest number of cells the active budget can analyze at that density.
     """
     return _max_cells(
         budget(), n_genes=n_genes, nnz_per_cell=nnz_per_cell, storage=storage, **kwargs
@@ -381,6 +406,72 @@ def _coerce_x(value: Any) -> Any:
     if hasattr(value, "tocsr") and hasattr(value, "indptr"):
         return _sparse_from_scipy(value)
     return np.asarray(value)
+
+
+def _export_parts(adata: Any) -> tuple[Any, Any, Any, dict, dict, dict]:
+    """What an export holds, with Scanpy's conventions: the matrix (as held:
+    ``SparseMatrix``, ``DiskMatrix``, an array, or ``None``), ``obs`` and ``var``
+    as data frames, and ``obsm``, ``obsp`` and ``uns`` with no memory-mapped
+    arrays. Shared by :meth:`AnnData.to_anndata` and :meth:`AnnData.write_h5ad`."""
+    import pandas as pd
+
+    disk = bool((adata.uns.get("pca") or {}).get("disk_backed"))
+    var_cols = {k: _as_column(v) for k, v in adata.var.items() if k != "name"}
+    if disk:
+        x = None
+        names = adata.var.get("name")
+        n = len(next(iter(var_cols.values()))) if var_cols else 0
+        var_index = [str(g) for g in names] if names is not None else [str(i) for i in range(n)]
+    else:
+        x = adata.X
+        var_index = [str(g) for g in adata.var_names]
+    obs = pd.DataFrame({k: _as_column(v) for k, v in adata.obs.items()},
+                       index=pd.Index([str(o) for o in adata.obs_names]))
+    var = pd.DataFrame(var_cols, index=pd.Index(var_index))
+    obsm = {k: np.asarray(v) for k, v in adata.obsm.items()}
+    # Results a project keeps on disk are memory-mapped; the file formats cannot write those.
+    obsp = {k: _in_memory(v) for k, v in adata.obsp.items()}
+    uns = _in_memory(dict(adata.uns))
+    batch_key = getattr(adata, "batch_key", None)
+    if batch_key in obs:
+        # As anndata.concat labels datasets: categorical, in file order.
+        obs[batch_key] = pd.Categorical(obs[batch_key], categories=adata.labels)
+    # Scanpy's conventions, so its tools (PAGA, plots by cluster) run on
+    # the result as they would on Scanpy's own: clusterings as
+    # categorical strings, and the neighbor graph's keys where Scanpy
+    # looks for them.
+    clusterings = {"louvain"}
+    leiden = adata.uns.get("leiden")
+    if isinstance(leiden, dict):
+        clusterings.add((leiden.get("params") or {}).get("key_added", "leiden"))
+    clusterings |= {k for k, v in adata.uns.items() if isinstance(v, dict) and "dendrogram" in v}
+    for k in clusterings:
+        if k in obs and np.issubdtype(obs[k].dtype, np.integer):
+            v = obs[k].to_numpy()
+            obs[k] = pd.Categorical(v.astype(str), categories=[str(c) for c in np.unique(v)])
+    nb = adata.uns.get("neighbors")
+    if isinstance(nb, dict) and "connectivities" in obsp:
+        params = {k: v for k, v in nb.items()
+                  if k not in ("connectivities", "distances", "params",
+                               "connectivities_key", "distances_key")}
+        scanpy_nb = {"connectivities_key": "connectivities",
+                     "params": {"method": "umap", **params}}
+        if "distances" in obsp:
+            scanpy_nb["distances_key"] = "distances"
+        uns["neighbors"] = scanpy_nb
+    return x, obs, var, obsm, obsp, uns
+
+
+def _in_memory(value: Any) -> Any:
+    """``value`` with every memory-mapped array (also inside dicts and lists) as a plain array, so that
+    an exported object can be written by anndata, h5py or pickle."""
+    if isinstance(value, np.memmap):
+        return np.asarray(value)
+    if isinstance(value, dict):
+        return {k: _in_memory(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return type(value)(_in_memory(v) for v in value)
+    return value
 
 
 def _sparse_from_scipy(x: Any) -> SparseMatrix:
@@ -454,6 +545,18 @@ class AnnData:
     _source: dict[str, Any] | None = None
     _rows: np.ndarray | None = None
     _cols: np.ndarray | None = None
+    #: The steps that rewrote the values of an in-memory sparse matrix read
+    #: from those files (normalize, log, renormalize, each with the genes it
+    #: saw), so that a saved analysis rebuilds the matrix from the counts
+    #: instead of storing it (``save``). ``None``: the values have another
+    #: origin, and a save stores them.
+    _xlog: list[dict[str, Any]] | None = None
+    #: The analysis's name within its dataset (``from_counts``): its results go
+    #: to ``runs/<dataset>/analyses/<analysis>/``. ``None``: the dataset's own.
+    analysis: str | None = None
+    #: The ``obs`` columns the analysis derived (clusters, scores, labels):
+    #: ``from_counts`` leaves them out, keeping the cells' own annotations.
+    _derived: set[str] | None = None
 
     def __init__(
         self,
@@ -480,6 +583,7 @@ class AnnData:
     @X.setter
     def X(self, value: Any) -> None:
         self._X = _coerce_x(value)
+        self._xlog = None  # values of unknown origin; the steps' own subsets keep it (_set_x)
 
     @property
     def n_obs(self) -> int:
@@ -519,6 +623,62 @@ class AnnData:
         """An independent copy (out of core, of the view, not the counts)."""
         return _subset(self, None, None)
 
+    def from_counts(self, name: str, *, genes: str = "all") -> AnnData:
+        """A new analysis of the same cells, starting again from their raw counts.
+
+        For trying other settings on the same data (another number of genes,
+        normalization, resolution) and comparing the results
+        (:func:`polariseq.tl.compare_analyses`). Nothing is copied out of core:
+        the new analysis reads the same on-disk counts through its own view. In
+        memory the cells' counts are read again from the files the data came
+        from.
+
+        The cells are this analysis's current cells (after quality control and
+        any doublet removal). Their own annotations come along: the files'
+        columns, quality metrics, doublet scores and any column you added (a
+        clinical table). What this analysis derived from its matrix does not:
+        clusters, scores, labels, embeddings, graphs.
+
+        Each analysis keeps its results in its own folder of the project,
+        ``runs/<dataset>/analyses/<name>/``, so analyses of one dataset never
+        replace each other's files; save each with ``save``.
+
+        Args:
+            name: The new analysis's name (letters, digits, ``. _ + -``).
+            genes: ``"all"`` (default): every gene of the source files, to
+                filter and select again; ``"current"``: this analysis's genes.
+
+        Returns:
+            The new analysis; this one is unchanged.
+        """
+        return _from_counts(self, name, genes)
+
+    def save(self, name: str, *, overwrite: bool = False) -> Any:
+        """Save the analysis in the project folder, to continue it later with :func:`load`.
+
+        Nothing is exported: the counts stay where they are and are pointed
+        to. Out of core the on-disk copy in the project is reopened with the
+        filters and normalization recorded; in memory the matrix is rebuilt
+        from the files it was read from, with the same kernels, so it is the
+        same to the last bit (a matrix with no such record is stored).
+        Results the steps keep in the project (embeddings, graphs, scores)
+        are linked, not copied. If a source file is moved, loading stops and
+        says where it was expected.
+
+        Saved to ``<project>/states/<name>/``. Opening the result in other
+        tools needs an export: :meth:`to_anndata`.
+
+        Args:
+            name: The saved analysis's name (letters, digits, ``. _ + -``).
+            overwrite: Replace a saved analysis of that name.
+
+        Returns:
+            The folder written.
+        """
+        from polariseq._state import save
+
+        return save(self, name, overwrite=overwrite)
+
     def to_anndata(self) -> Any:
         """Convert to an ``anndata.AnnData``, for Scanpy and the tools built on it.
 
@@ -529,56 +689,52 @@ class AnnData:
         and every per-cell result. Requires the ``anndata`` package.
         """
         import anndata as ad
-        import pandas as pd
 
-        disk = bool((self.uns.get("pca") or {}).get("disk_backed"))
-        var_cols = {k: _as_column(v) for k, v in self.var.items() if k != "name"}
-        if disk:
-            x = None
-            names = self.var.get("name")
-            n = len(next(iter(var_cols.values()))) if var_cols else 0
-            var_index = [str(g) for g in names] if names is not None else [str(i) for i in range(n)]
-        else:
-            x = self.X
-            x = None if _is_disk(x) else (x.to_scipy() if _is_sparse(x) else x)
-            var_index = [str(g) for g in self.var_names]
-        obs = pd.DataFrame({k: _as_column(v) for k, v in self.obs.items()},
-                           index=pd.Index([str(o) for o in self.obs_names]))
-        var = pd.DataFrame(var_cols, index=pd.Index(var_index))
+        x, obs, var, obsm, obsp, uns = _export_parts(self)
+        if _is_disk(x):
+            x = None  # an out-of-core matrix stays on disk (write_h5ad streams it into a file)
+        elif _is_sparse(x):
+            x = x.to_scipy()
         out = ad.AnnData(X=x, obs=obs, var=var)
-        for k, v in self.obsm.items():
-            out.obsm[k] = np.asarray(v)
-        for k, v in self.obsp.items():
+        for k, v in obsm.items():
+            out.obsm[k] = v
+        for k, v in obsp.items():
             out.obsp[k] = v
-        out.uns.update(self.uns)
-        batch_key = getattr(self, "batch_key", None)
-        if batch_key in out.obs:
-            # As anndata.concat labels datasets: categorical, in file order.
-            out.obs[batch_key] = pd.Categorical(out.obs[batch_key], categories=self.labels)
-        # Scanpy's conventions, so its tools (PAGA, plots by cluster) run on
-        # the result as they would on Scanpy's own: clusterings as
-        # categorical strings, and the neighbor graph's keys where Scanpy
-        # looks for them.
-        clusterings = {"louvain"}
-        leiden = self.uns.get("leiden")
-        if isinstance(leiden, dict):
-            clusterings.add((leiden.get("params") or {}).get("key_added", "leiden"))
-        clusterings |= {k for k, v in self.uns.items() if isinstance(v, dict) and "dendrogram" in v}
-        for k in clusterings:
-            if k in out.obs and np.issubdtype(out.obs[k].dtype, np.integer):
-                v = out.obs[k].to_numpy()
-                out.obs[k] = pd.Categorical(v.astype(str), categories=[str(c) for c in np.unique(v)])
-        nb = self.uns.get("neighbors")
-        if isinstance(nb, dict) and "connectivities" in out.obsp:
-            params = {k: v for k, v in nb.items()
-                      if k not in ("connectivities", "distances", "params",
-                                   "connectivities_key", "distances_key")}
-            scanpy_nb = {"connectivities_key": "connectivities",
-                         "params": {"method": "umap", **params}}
-            if "distances" in out.obsp:
-                scanpy_nb["distances_key"] = "distances"
-            out.uns["neighbors"] = scanpy_nb
+        out.uns.update(uns)
         return out
+
+    def write_h5ad(self, path: str | os.PathLike, *, counts: bool = False) -> Any:
+        """Write the analysis as an ``.h5ad`` file for other tools (Scanpy, cellxgene, R).
+
+        ``X`` holds the matrix as the analysis left it: the normalized (and
+        log-transformed) values of the current cells and genes, the selected
+        genes after a gene selection with ``subset=True``. Out of core it is
+        streamed from the on-disk copy a few blocks at a time, so an atlas is
+        written within the memory budget. Annotations, embeddings, graphs and
+        results follow, with Scanpy's conventions (as :meth:`to_anndata`).
+
+        ``uns['polariseq']`` points back to the raw counts: the source files
+        (path, size, time), which of their cells (``rows``) and genes
+        (``cols``) the file holds, and the steps that made ``X``. Polariseq can
+        start again from there; other tools ignore it. With ``counts=True`` the
+        raw counts of those cells and genes are also written, as
+        ``layers['counts']``, for someone without the source files (a copy of
+        the counts: the file grows accordingly).
+
+        Needs no ``anndata`` package. The file is written under a temporary
+        name and renamed when complete, so an interrupted write never leaves a
+        broken file at ``path``.
+
+        Args:
+            path: The ``.h5ad`` file to write (replaced if it exists).
+            counts: Also write the raw counts as ``layers['counts']``.
+
+        Returns:
+            The path written.
+        """
+        from polariseq._h5ad import write_h5ad
+
+        return write_h5ad(self, path, counts=counts)
 
 
 class LazyAnnData:
@@ -660,6 +816,9 @@ class LazyAnnData:
         self._source: dict[str, Any] | None = None
         self._rows: np.ndarray | None = None
         self._cols: np.ndarray | None = None
+        self._xlog: list[dict[str, Any]] | None = []  # the counts as read (see AnnData._xlog)
+        self.analysis: str | None = None  # see AnnData.analysis
+        self._derived: set[str] | None = None
 
     def _scan_mtx_header(self, dir_path: str) -> None:
         """Read just the matrix.mtx header line for dimensions."""
@@ -725,6 +884,13 @@ class LazyAnnData:
         For .h5ad this is a true partial read; 10x formats (mtx/h5) have no
         random-access layout, so they are materialized first (raw-count files
         are typically small).
+
+        Args:
+            n: Number of cells, from the first.
+
+        Returns:
+            A dict with ``data``, ``indices``, ``indptr``, ``n_cells`` and ``n_genes`` (the cells'
+            raw values).
         """
         if self.source_format == "h5ad":
             return self._read_rows(0, min(n, self._n_obs))
@@ -747,7 +913,15 @@ class LazyAnnData:
         }
 
     def sample(self, n: int = 100, seed: int = 42):
-        """Preview a random sample of cells as a scipy CSR matrix."""
+        """Preview a random sample of cells as a scipy CSR matrix.
+
+        Args:
+            n: Number of cells, drawn at random.
+            seed: Random seed.
+
+        Returns:
+            A SciPy CSR matrix of the cells' raw values.
+        """
         sp = _scipy_sparse("sample()")
         if self.source_format != "h5ad":
             # No random access for 10x formats — materialize and slice.
@@ -841,6 +1015,7 @@ class LazyAnnData:
     def X(self, value: Any) -> None:
         self._X = _coerce_x(value)
         self._materialized = True
+        self._xlog = None
 
     @property
     def out_dir(self) -> Any:
@@ -852,6 +1027,13 @@ class LazyAnnData:
     def to_anndata(self) -> Any:
         """Convert to an ``anndata.AnnData`` (see :meth:`AnnData.to_anndata`)."""
         return AnnData.to_anndata(self)
+
+    def write_h5ad(self, path: str | os.PathLike, *, counts: bool = False) -> Any:
+        """Write the analysis as an ``.h5ad`` file (see :meth:`AnnData.write_h5ad`)."""
+        from polariseq._h5ad import write_h5ad
+
+        self._materialize()
+        return write_h5ad(self, path, counts=counts)
 
     def __repr__(self) -> str:
         status = "materialized" if self._materialized else f"lazy (~{self._est_memory_gb:.1f} GB on materialize)"
@@ -868,6 +1050,18 @@ class LazyAnnData:
     def copy(self) -> AnnData:
         """An independent copy, as :meth:`AnnData.copy`."""
         return _subset(self, None, None)
+
+    def from_counts(self, name: str, *, genes: str = "all") -> Any:
+        """A new analysis of the same cells from their raw counts (see :meth:`AnnData.from_counts`)."""
+        self._materialize()
+        return _from_counts(self, name, genes)
+
+    def save(self, name: str, *, overwrite: bool = False) -> Any:
+        """Save the analysis in the project folder (see :meth:`AnnData.save`)."""
+        from polariseq._state import save
+
+        self._materialize()
+        return save(self, name, overwrite=overwrite)
 
     def close(self) -> None:
         """Release all resources: free matrix memory, close mmaps, delete temp files.
@@ -1117,6 +1311,9 @@ def read_10x_h5(path: str, *, lazy: bool = True) -> AnnData | LazyAnnData:
     Returns:
         A :class:`LazyAnnData` (default) or :class:`AnnData` if ``lazy=False``.
     """
+    from polariseq import _checks
+
+    path = _checks.input_file(path, what="read_10x_h5", kind="h5")
     if lazy:
         return LazyAnnData(path, "10x_h5")
     result = _read_10x_h5_raw(path)
@@ -1134,6 +1331,9 @@ def read_10x_mtx(dir: str, *, lazy: bool = True) -> AnnData | LazyAnnData:
     Returns:
         A :class:`LazyAnnData` (default) or :class:`AnnData` if ``lazy=False``.
     """
+    from polariseq import _checks
+
+    dir = _checks.input_file(dir, what="read_10x_mtx", kind="mtx")
     if lazy:
         return LazyAnnData(dir, "10x_mtx")
     result = _read_10x_mtx_raw(dir)
@@ -1185,7 +1385,11 @@ def read_h5ad(path: str | list[str] | dict[str, str], *, sparse: bool = True,
     Returns:
         A :class:`LazyAnnData` (default) or :class:`AnnData` if ``lazy=False``.
     """
+    from polariseq import _checks
+
     if not isinstance(path, (str, os.PathLike)):
+        for _, p in _sources(path):
+            _checks.input_file(p, what="read_h5ad")
         if not sparse:
             raise ValueError("several files are read into a sparse matrix: drop sparse=False")
         if not lazy and mode == "out-of-core":
@@ -1198,8 +1402,9 @@ def read_h5ad(path: str | list[str] | dict[str, str], *, sparse: bool = True,
         out = AnnData(X=merged.X, obs=merged.obs, obs_names=merged.obs_names,
                       var_names=merged.var_names)
         out._source = merged._source
+        out._xlog = []
         return out
-    path = os.fspath(path)
+    path = _checks.input_file(path, what="read_h5ad")
     if lazy:
         return LazyAnnData(path, "h5ad", mode=mode, name=name, obs_columns=obs_columns)
     if mode == "out-of-core":
@@ -1209,6 +1414,30 @@ def read_h5ad(path: str | list[str] | dict[str, str], *, sparse: bool = True,
         raise ValueError(_too_large_for_memory(shape["n_elements"], path))
     _warn_if_over_budget(shape["n_obs"], shape["n_vars"], shape["n_elements"], path)
     return _read_h5ad_eager(path, sparse, obs_columns)
+
+
+def load(project: str | os.PathLike, name: str, *, relink: dict[str, str] | None = None) -> Any:
+    """Open an analysis saved with ``adata.save(name)``, to continue where it stopped.
+
+    Declares ``project`` the project folder (as :func:`project` does) and
+    returns the object as it was saved: its cells and genes, the matrix as
+    the steps left it (out of core the on-disk copy reopened with its
+    filters and normalization; in memory rebuilt from the source files), and
+    every annotation, embedding, graph and result. Large arrays are
+    memory-mapped, so loading reads little.
+
+    Args:
+        project: The project folder the analysis was saved in.
+        name: The saved analysis's name.
+        relink: New places of moved source files, ``{old path: new path}``.
+
+    Raises:
+        SourceMovedError: A source file is no longer where it was; the
+            message says where it was expected.
+    """
+    from polariseq._state import load as _load
+
+    return _load(project, name, relink=relink)
 
 
 def _read_h5ad_matrix(path: str, sparse: bool = True) -> Any:
@@ -1235,6 +1464,7 @@ def _read_h5ad_eager(path: str, sparse: bool = True,
     )
     n, g = out.shape
     out._source = {"paths": [path], "maps": None, "n_rows": n, "n_cols": g}
+    out._xlog = []
     return out
 
 
@@ -1317,8 +1547,9 @@ class _Preprocessing:
         if batch_key is None:
             codes, labels = np.zeros(n, dtype=np.uint32), ["all"]
         else:
-            if batch_key not in adata.obs:
-                raise KeyError(f"batch_key {batch_key!r} is not in obs")
+            from polariseq import _checks
+
+            _checks.column(adata, batch_key, what="scrublet batch_key")
             col = adata.obs[batch_key]
             cat = col if isinstance(col, pd.Categorical) else pd.Categorical(np.asarray(col))
             c = np.asarray(cat.codes, dtype=np.int64)
@@ -1473,7 +1704,9 @@ class _Preprocessing:
             mask &= (ng >= min_genes) & (ng <= max_genes)
         if max_pct_mt < np.inf:
             if "pct_counts_mt" not in adata.obs:
-                raise KeyError(
+                from polariseq import _checks
+
+                raise _checks.InputError(
                     "max_pct_mt needs obs['pct_counts_mt']: run calculate_qc_metrics "
                     "on data with mitochondrial genes first"
                 )
@@ -1554,9 +1787,9 @@ class _Preprocessing:
                 # instead of the ~1.5x of a masked copy.
                 adata.X.retain_rows_mask(np.ascontiguousarray(mask, dtype=np.bool_))
             else:
-                adata.X = adata.X[mask, :]
+                _set_x(adata, adata.X[mask, :])
         else:
-            adata.X = adata.X[mask]
+            _set_x(adata, adata.X[mask])
         adata.obs = {k: _take(v, mask) for k, v in adata.obs.items()}
         adata._rows = _keep_positions(getattr(adata, "_rows", None), np.flatnonzero(mask))
         adata.obsm = {k: v[mask] for k, v in adata.obsm.items()}
@@ -1581,7 +1814,7 @@ class _Preprocessing:
         if _is_disk(adata.X):
             adata.X.retain_cols_mask(np.ascontiguousarray(mask, dtype=np.bool_))
         else:
-            adata.X = adata.X[:, mask]
+            _set_x(adata, adata.X[:, mask])
         adata.var = {k: _take(v, mask) for k, v in adata.var.items()}
         adata._cols = _keep_positions(getattr(adata, "_cols", None), np.flatnonzero(mask))
         if adata.var_names:
@@ -1614,6 +1847,7 @@ class _Preprocessing:
             if _is_sparse(adata.X):
                 # each cell's total, so that renormalize can turn values back into counts in place
                 adata.uns.setdefault("normalize", {})["cell_totals"] = np.asarray(totals, dtype=np.float32)
+                _log_x(adata, {"op": "normalize_total", "target_sum": target_sum})
         else:
             row_sums = adata.X.sum(axis=1, keepdims=True)
             row_sums[row_sums == 0] = 1.0
@@ -1669,6 +1903,8 @@ class _Preprocessing:
             old = adata.uns["normalize"]
             back = np.asarray(old["cell_totals"], dtype=np.float32) / np.float32(old["target_sum"])
             adata.X.renormalize_inplace(back, "log1p" in adata.uns, float(target_sum), bool(log1p))
+            _log_x(adata, {"op": "renormalize", "from_log": "log1p" in adata.uns,
+                           "target_sum": target_sum, "log1p": bool(log1p)})
             adata.uns.pop("log1p", None)
             adata.uns["normalize"] = {"target_sum": target_sum, "over": "current genes"}
             if log1p:
@@ -1699,6 +1935,8 @@ class _Preprocessing:
         adata = self._ensure_materialized(adata)
         if _is_sparse(adata.X) or _is_disk(adata.X):
             adata.X.log1p()  # in place (a view out of core)
+            if _is_sparse(adata.X):
+                _log_x(adata, {"op": "log1p"})
         else:
             adata.X = np.log1p(adata.X).astype(np.float32)
         adata.uns["log1p"] = {"base": None}  # as Scanpy records it
@@ -1713,6 +1951,7 @@ class _Preprocessing:
         min_cells: int | None = None,
         n_bins: int | None = None,
         lowess_frac: float = 0.1,
+        include: list[str] | None = None,
     ) -> None:
         """Select highly-variable genes (scanpy ``pp.highly_variable_genes``).
 
@@ -1748,7 +1987,26 @@ class _Preprocessing:
                 ``'scarf'``).
             lowess_frac: ``'scarf'`` only: the share of floor genes in each
                 local fit of the trend.
+            include: Genes to keep whatever the ranking chooses, by name: those
+                not among the top ``n_top_genes`` are added to them (so up to
+                ``n_top_genes + len(include)`` genes are kept), past the
+                detection floor. ``var['included']`` marks them and
+                ``uns['hvg']['include']`` records the request. With
+                ``subset=True`` the renormalization and PCA that follow run on
+                them too; note that ``pca(scale=True)`` gives each gene equal
+                weight, a rarely detected one included. A name that is not
+                among the current genes is an error saying why (absent from the
+                data, or removed by an earlier step) and the closest names.
         """
+        from polariseq import _checks
+
+        if int(n_top_genes) <= 0:
+            raise ValueError(f"highly_variable_genes: n_top_genes must be positive, not {n_top_genes}")
+        if int(n_top_genes) >= adata.n_vars:
+            import warnings
+
+            warnings.warn(f"highly_variable_genes: n_top_genes={n_top_genes:,}, but the data hold "
+                          f"{adata.n_vars:,} genes; every gene is selected", stacklevel=2)
         if flavor is None:
             flavor = "seurat"
             if _WORKFLOW == "polariseq" and min_cells is None:
@@ -1758,6 +2016,10 @@ class _Preprocessing:
                 f"flavor={flavor!r} is not implemented; 'seurat' and 'scarf' are available"
             )
         adata = self._ensure_materialized(adata)
+        forced = None
+        if include is not None:
+            forced = _checks.gene_positions(adata.var_names, include, what="include",
+                                            source_names=_source_gene_names(adata))
         X = adata.X if (_is_sparse(adata.X) or _is_disk(adata.X)) else SparseMatrix.from_dense(
             np.ascontiguousarray(adata.X, dtype=np.float32)
         )
@@ -1780,14 +2042,17 @@ class _Preprocessing:
             adata.var["dispersions_norm"] = np.asarray(r["dispersions_norm"])
             adata.var["highly_variable"] = hvg_mask
             adata.uns["hvg"] = {"n_top_genes": int(r["n_hvg"]), "flavor": "seurat", "min_cells": floor}
+        if forced is not None:
+            hvg_mask = _add_included(adata, X, hvg_mask, forced, floor)
 
         # Auto-subset if requested (updates X, var, and var_names together).
         if subset:
             if _is_disk(adata.X):
                 adata.X.retain_cols_mask(np.ascontiguousarray(hvg_mask, dtype=np.bool_))
             else:
-                adata.X = adata.X[:, hvg_mask]
+                _set_x(adata, adata.X[:, hvg_mask])
             adata.var = {k: np.asarray(v)[hvg_mask] for k, v in adata.var.items()}
+            adata._cols = _keep_positions(getattr(adata, "_cols", None), np.flatnonzero(hvg_mask))
             if adata.var_names:
                 adata.var_names = [n for n, m in zip(adata.var_names, hvg_mask, strict=True) if m]
             if hasattr(adata, "_n_vars"):
@@ -1825,6 +2090,10 @@ class _Preprocessing:
         if scale and not center:
             raise ValueError("scale=True always centers; drop center=False")
         adata = self._ensure_materialized(adata)
+        most = min(adata.n_obs, adata.n_vars)
+        if not 0 < int(n_components) <= most:
+            raise ValueError(f"pca: n_components={n_components}, but {adata.n_obs:,} cells x "
+                             f"{adata.n_vars:,} genes give at most {most:,} components")
         # The embedding is written by the core straight into its result
         # array: a memory-mapped file in the project when there is one.
         out = _results.new(adata, "pca", "X_pca", (adata.n_obs, n_components), np.float32)
@@ -1896,7 +2165,10 @@ class _Preprocessing:
                 Default: auto (exact ≤ 10K cells, approximate above).
             seed: Random seed for NN-Descent.
         """
+        from polariseq import _checks
+
         adata = self._ensure_materialized(adata)
+        _checks.result(adata, use_rep, what="neighbors", where="obsm", made_by=_checks.made_by(use_rep))
         embedding = adata.obsm[use_rep]
         if n_pcs is not None:
             embedding = embedding[:, :n_pcs]
@@ -2057,6 +2329,7 @@ class _Preprocessing:
             alpha: Scale of the estimated ridge penalty.
             seed: Random seed.
         """
+        from polariseq import _checks
         from polariseq._compare import categorical
 
         keys = [batch_key] if isinstance(batch_key, str) else list(batch_key)
@@ -2064,8 +2337,7 @@ class _Preprocessing:
             raise ValueError("batch_key names no column")
         codes, n_levels = [], []
         for key in keys:
-            if key not in adata.obs:
-                raise KeyError(f"batch_key '{key}' not in adata.obs")
+            _checks.column(adata, key, what="harmony_integrate batch_key")
             cat = categorical(adata.obs[key]).remove_unused_categories()
             c = np.asarray(cat.codes)
             if (c < 0).any():
@@ -2074,8 +2346,8 @@ class _Preprocessing:
             n_levels.append(len(cat.categories))
         if all(n < 2 for n in n_levels):
             raise ValueError("Need >= 2 batches for correction")
-        if use_rep not in adata.obsm:
-            raise KeyError(f"'{use_rep}' not in adata.obsm; run ps.pp.pca first")
+        _checks.result(adata, use_rep, what="harmony_integrate", where="obsm",
+                       made_by=_checks.made_by(use_rep))
         # A float32 C-ordered embedding (a memory-mapped result included) is
         # read as it is; anything else is converted once.
         embedding = np.ascontiguousarray(adata.obsm[use_rep], dtype=np.float32)
@@ -2256,19 +2528,22 @@ class _Tools:
         pp = _Preprocessing()
         pp._ensure_materialized(adata)
 
-        if groupby not in adata.obs:
-            raise KeyError(f"groupby '{groupby}' not in obs. Run clustering first.")
+        from polariseq import _checks
+
+        _checks.groups_column(adata, groupby, what="rank_genes_groups")
         cat = categorical(adata.obs[groupby])
         names = [str(c) for c in cat.categories]
         codes = np.asarray(cat.codes, dtype=np.int64)
+        if groups is not None:
+            _checks.values_in(groups, names, what="rank_genes_groups groups", column=f"obs[{groupby!r}]")
         wanted = set(names if groups is None else map(str, groups))
         var_names = list(adata.var_names) if adata.var_names else [f"gene_{i}" for i in range(adata.n_vars)]
         X = adata.X if (_is_sparse(adata.X) or _is_disk(adata.X)) else SparseMatrix.from_dense(
             np.ascontiguousarray(adata.X, dtype=np.float32))
 
         if reference != "rest":
-            if reference not in names:
-                raise KeyError(f"reference {reference!r} is not a value of obs[{groupby!r}]")
+            _checks.values_in([reference], names, what="rank_genes_groups reference",
+                              column=f"obs[{groupby!r}]")
             from polariseq._polariseq import compare_cells
 
             ref = names.index(reference)
@@ -2311,10 +2586,10 @@ class _Tools:
         did, over the genes it kept; cells removed in quality control take no
         part. The test and the result are those of the in-memory function.
         """
+        from polariseq import _checks
         from polariseq._polariseq import rank_genes_groups_file
 
-        if groupby not in adata.obs:
-            raise KeyError(f"groupby '{groupby}' not in obs. Run clustering first.")
+        _checks.groups_column(adata, groupby, what="rank_genes_groups")
         from polariseq._compare import categorical
         cat = categorical(adata.obs[groupby])
         names = [str(c) for c in cat.categories]
@@ -2353,6 +2628,40 @@ class _Tools:
                 "pts": np.asarray(g["pts"][:top_n]),
             }
         adata.uns["rank_genes_groups"] = uns_result
+
+    def compare_analyses(self, analyses: dict, key: str = "leiden", *, labels: str | None = None,
+                         seeds: int = 0, n_markers: int = 20) -> Any:
+        """How far analyses of the same cells agree: the effect of their settings.
+
+        For analyses made with different settings (``adata.from_counts``),
+        compared on the cells they share (matched by name)::
+
+            runs = {"hvg2000": a, "hvg3000": b}
+            cmp = ps.tl.compare_analyses(runs, labels="cell_type", seeds=2)
+            print(cmp)                           # clusters, agreement, labels, noise
+            cmp.matches[("hvg2000", "hvg3000")]  # which cluster became which
+
+        Args:
+            analyses: ``{name: analysis}``, two or more.
+            key: The ``obs`` column of clusters in each (default ``"leiden"``).
+            labels: An ``obs`` column of reference labels (for example the
+                authors' cell types) to score each analysis against.
+            seeds: Rerun each analysis's Leiden clustering with this many other
+                seeds and report its agreement with itself: the run-to-run
+                variation a difference between settings should exceed. The
+                analyses are left as they were.
+            n_markers: Top marker genes compared between matched clusters, when
+                both analyses ran ``rank_genes_groups`` on ``key``.
+
+        Returns:
+            An :class:`~polariseq._analyses.AnalysisComparison`: ``ari`` and
+            ``nmi`` (every pair), ``n_clusters``, ``matches`` and ``crossing``
+            (per pair), ``labels`` and ``noise`` when asked; printing it shows
+            a summary. ``ps.pl.compare_analyses`` draws the clusters side by side.
+        """
+        from polariseq._analyses import compare_analyses
+
+        return compare_analyses(analyses, key, labels=labels, seeds=seeds, n_markers=n_markers)
 
     def compare_conditions(
         self,
@@ -2445,10 +2754,22 @@ class _Tools:
         if score_name is None:
             score_name = f"score_{gene_list[0][:10]}"
 
+        from polariseq import _checks
+
         var_names = list(adata.var_names) if adata.var_names else []
-        gene_idx = [var_names.index(g) for g in gene_list if g in var_names]
-        if not gene_idx:
-            raise ValueError(f"None of {gene_list[:3]}... found in var_names")
+        known = set(var_names)
+        found = [g for g in gene_list if g in known]
+        if not found:  # the error names each gene and why it is missing
+            _checks.gene_positions(var_names, gene_list, what="score_genes",
+                                   source_names=_source_gene_names(adata))
+        missing = [g for g in gene_list if g not in known]
+        if missing:
+            import warnings
+
+            warnings.warn(f"score_genes: {len(missing)} of the {len(gene_list)} genes are not in "
+                          f"the data and are left out of the score: {_checks.listing(missing)}",
+                          stacklevel=2)
+        gene_idx = [var_names.index(g) for g in found]
 
         # Mean expression of the gene set.
         if _is_sparse(adata.X):
@@ -2470,6 +2791,7 @@ class _Tools:
             control_mean = adata.X[:, control_idx].mean(axis=1)
 
         adata.obs[score_name] = (set_mean - control_mean).astype(np.float32)
+        _derived(adata, score_name)
 
     def auto_annotate(
         self,
@@ -2498,8 +2820,9 @@ class _Tools:
             species: "human" or "mouse" (used by PanglaoDB).
             method: Annotation method ('panglaodb', 'markers', or 'celltypist').
         """
-        if groupby not in adata.obs:
-            raise KeyError(f"groupby '{groupby}' not in obs")
+        from polariseq import _checks
+
+        _checks.groups_column(adata, groupby, what="auto_annotate")
 
         if method == "celltypist":
             self._annotate_celltypist(adata, tissue)
@@ -2619,6 +2942,7 @@ class _Tools:
             [assignments[int(c)] for c in cluster_labels], dtype=object
         )
         adata.obs["cell_type"] = cell_type_labels
+        _derived(adata, "cell_type")
         adata.uns["annotation"] = {
             "assignments": assignments,
             "scores": annotation_scores,
@@ -2681,6 +3005,7 @@ class _Tools:
             adata.obs["cell_type"] = np.asarray(
                 real_adata.obs[label_col].astype(str).values, dtype=object
             )
+            _derived(adata, "cell_type")
 
         adata.uns["annotation"] = {
             "method": "celltypist",
@@ -2753,8 +3078,10 @@ class _Tools:
             key_added: ``obs`` / ``uns`` key.
             recompute: Rebuild the dendrogram even if one is stored.
         """
-        if "connectivities" not in adata.obsp:
-            raise KeyError("Run ps.pp.neighbors() first")
+        from polariseq import _checks
+
+        _checks.result(adata, "connectivities", what="paris", where="obsp",
+                       made_by="ps.pp.neighbors")
         from polariseq._polariseq import (
             dendrogram_cut_balanced,
             dendrogram_cut_straight,
@@ -2780,11 +3107,13 @@ class _Tools:
                 raise ValueError("balanced=True needs min_size and max_size")
             labels = dendrogram_cut_balanced(d, int(max_size), int(min_size), float(max_distance_fc))
             adata.obs[key_added] = (labels - 1).astype(np.int32)
+            _derived(adata, key_added)
             stored["cut"] = {"balanced": True, "min_size": int(min_size), "max_size": int(max_size),
                              "max_distance_fc": float(max_distance_fc)}
         elif n_clusters is not None:
             labels = dendrogram_cut_straight(d, int(n_clusters))
             adata.obs[key_added] = labels.astype(np.int32)
+            _derived(adata, key_added)
             stored["cut"] = {"n_clusters": int(n_clusters)}
         if key_added in adata.obs:
             stored["n_clusters"] = int(np.asarray(adata.obs[key_added]).max()) + 1
@@ -2803,8 +3132,12 @@ class _Tools:
             adata: The data container.
             root: Index of the root cell (pseudotime origin).
         """
-        if "distances" not in adata.obsp:
-            raise KeyError("Run ps.pp.neighbors() first")
+        from polariseq import _checks
+
+        _checks.result(adata, "distances", what="dpt", where="obsp", made_by="ps.pp.neighbors")
+        if not 0 <= int(root) < adata.n_obs:
+            raise ValueError(f"dpt: root={root} is not a cell; give a position from 0 to "
+                             f"{adata.n_obs - 1:,}")
 
         from polariseq._polariseq import pseudotime_dijkstra as _dpt
         dist = adata.obsp["distances"]
@@ -2816,6 +3149,7 @@ class _Tools:
             root,
         )
         adata.obs["dpt_pseudotime"] = np.asarray(result["pseudotime"], dtype=np.float32)
+        _derived(adata, "dpt_pseudotime")
         adata.uns["dpt"] = {"root": root, "n_reachable": result["n_reachable"]}
 
     def paga(
@@ -2832,14 +3166,18 @@ class _Tools:
             adata: The data container.
             groupby: Column in obs identifying clusters.
         """
-        if "distances" not in adata.obsp:
-            raise KeyError("Run ps.pp.neighbors() first")
-        if groupby not in adata.obs:
-            raise KeyError(f"groupby '{groupby}' not in obs")
+        from polariseq import _checks
+
+        _checks.result(adata, "distances", what="paga", where="obsp", made_by="ps.pp.neighbors")
+        _checks.groups_column(adata, groupby, what="paga")
 
         from polariseq._polariseq import paga_connectivities as _paga
         dist = adata.obsp["distances"]
-        labels = np.asarray(adata.obs[groupby]).astype(np.uint32)
+        try:
+            labels = np.asarray(adata.obs[groupby]).astype(np.uint32)
+        except (TypeError, ValueError):
+            raise ValueError(f"paga: obs[{groupby!r}] holds names; paga groups cells by numbered "
+                             "clusters (as leiden makes): pass that column") from None
         n_clusters = int(labels.max()) + 1
 
         result = _paga(
@@ -2914,7 +3252,9 @@ class _Tools:
         # (the fuzzy set itself, as Scanpy lays out), else its distances.
         use_conn = "connectivities" in adata.obsp
         if not use_conn and "distances" not in adata.obsp:
-            raise KeyError("Run ps.pp.neighbors() first")
+            from polariseq import _checks
+
+            _checks.graph(adata, what="umap")
         graph = adata.obsp["connectivities" if use_conn else "distances"]
         if use_conn and hasattr(graph, "has_sorted_indices") and not graph.has_sorted_indices:
             graph.sort_indices()  # the core expects rows sorted by column
@@ -3026,6 +3366,12 @@ class _Tools:
         Requires :meth:`pp.neighbors` to have been run first.
 
         Args:
+            adata: The analysis, after ``pp.neighbors``.
+            resolution: Higher gives more, smaller clusters; lower fewer, larger ones.
+            seed: Random seed; the same seed gives the same clusters.
+            key_added: The ``obs`` column the cluster numbers are written to.
+            method: ``'auto'`` (Leiden), ``'fast'`` (multi-level Louvain) or ``'igraph'`` (igraph's
+                Leiden, needs python-igraph).
         """
         # The graph every method runs on: the symmetrised fuzzy
         # connectivities (scanpy semantics; the graph UMAP shares), used as
@@ -3033,6 +3379,9 @@ class _Tools:
         # are comparable across implementations. The arrays are handed over
         # as views, not copies: at 4M cells the graph is ~1 GB, and each
         # `astype` here used to duplicate it.
+        from polariseq import _checks
+
+        _checks.graph(adata, what="leiden")
         if "connectivities" in adata.obsp:
             conn = adata.obsp["connectivities"]
             if hasattr(conn, "has_sorted_indices") and not conn.has_sorted_indices:
@@ -3092,6 +3441,7 @@ class _Tools:
                 _ig.set_random_number_generator(_random)
             labels = np.asarray(part.membership, dtype=np.int32)
             adata.obs[key_added] = labels
+            _derived(adata, key_added)
             adata.uns["leiden"] = {
                 "n_communities": int(len(part)),
                 "quality": float(g.modularity(part.membership, weights="weight")),
@@ -3124,6 +3474,7 @@ class _Tools:
                 algo = "leiden"
 
         adata.obs[key_added] = result["labels"].astype(np.int32)
+        _derived(adata, key_added)
         adata.uns["leiden"] = {
             "n_communities": int(result["n_communities"]),
             "quality": float(result["quality"]),
@@ -3158,6 +3509,18 @@ class _Get:
         wherever the raw counts are held (see :meth:`tl.compare_conditions`);
         with a project folder the result is a memory-mapped file. Pass the
         result's ``to_anndata()`` to pydeseq2, or write its ``X`` for R.
+
+        Args:
+            adata: The analysis; the raw counts are read wherever they are held.
+            sample_key: ``obs`` column of the biological replicates (for example the donor).
+            groupby: ``obs`` column of the cell types (default: all cells as one group).
+            condition_key: ``obs`` column of the conditions, to keep them apart.
+            min_cells: A combination with fewer cells is left out.
+
+        Returns:
+            An object with one row per combination (``obs`` names its groupby, condition and
+            replicate, and ``obs['n_cells']``), the summed counts in ``X``, the genes in
+            ``var_names``.
         """
         from polariseq._compare import pseudobulk as _pseudobulk
 
@@ -3482,6 +3845,7 @@ def process_diskbacked(
     max_pct_mt: float = np.inf,
     mito_prefix: str = "MT-",
     min_cells: int = 0,
+    include: list[str] | None = None,
 ) -> AnnData:
     """Run the pipeline on a dataset that exceeds RAM, using SSD.
 
@@ -3523,6 +3887,10 @@ def process_diskbacked(
             for it to be kept, matching ``ps.pp.filter_genes`` after
             ``filter_cells``; removed genes take no part in normalization,
             gene selection or PCA (``var['kept']``).
+        include: Genes to keep whatever the ranking chooses, added to the top
+            ``n_hvg`` (see ``ps.pp.highly_variable_genes``). A name not in the
+            file, or a gene the ``min_cells`` filter removes, is an error naming
+            it, raised before the gene selection runs.
 
     The cell and gene filters are those of the in-memory functions, applied
     in the same order (quality control, ``filter_cells``, ``filter_genes``),
@@ -3535,6 +3903,9 @@ def process_diskbacked(
     import os
     import time
 
+    from polariseq import _checks
+
+    path = _checks.input_file(path, what="process_diskbacked")
     file_gb = estimate_dataset_size_gb(path)
     spill_dir = budget().spill_dir
     os.makedirs(spill_dir, exist_ok=True)
@@ -3600,6 +3971,14 @@ def process_diskbacked(
         raise ValueError(
             f"max_pct_mt needs mitochondrial genes: no gene name starts with {mito_prefix!r}"
         )
+    forced: list[tuple[int, str]] = []
+    if include is not None:
+        from polariseq import _checks
+
+        if var_names is None:
+            raise ValueError(f"include: {path} has no gene names to match the genes by")
+        pos = _checks.gene_positions(var_names, include, what="include")
+        forced = [(int(i), str(var_names[i])) for i in pos]
 
     t0 = time.perf_counter()
     r = _disk_backed_preprocess(
@@ -3615,6 +3994,7 @@ def process_diskbacked(
         hvg_floor_frac=0.01 if _WORKFLOW == "polariseq" else 0.0,
         renormalize=1000.0 if _WORKFLOW == "polariseq" else None,
         scale_pcs=_WORKFLOW == "polariseq",
+        include=forced,
     )
     prep_t = time.perf_counter() - t0
     filtered = int(r.get("n_obs_input", r["n_obs"])) - int(r["n_obs"])
@@ -3664,6 +4044,13 @@ def process_diskbacked(
     }
     adata.uns["hvg"] = {"n_top_genes": int(adata.var["highly_variable"].sum()),
                         "flavor": "seurat"}
+    if forced:
+        included = np.zeros(int(r["n_vars"]), dtype=bool)
+        included[[i for i, _ in forced]] = True
+        adata.var["included"] = included
+        adata.uns["hvg"]["n_top_genes"] = int(n_hvg)
+        adata.uns["hvg"].update(include=[n for _, n in forced],
+                                n_selected=int(adata.var["highly_variable"].sum()))
     # Where the matrix is, and how it was normalized, so steps that need the
     # matrix again (ps.tl.rank_genes_groups) stream it with the same
     # transform and the same gene filter.
@@ -3712,7 +4099,177 @@ def _positions(key: Any, n: int, names: Any, what: str) -> np.ndarray | None:
         return np.fromiter((lookup[str(k)] for k in arr.ravel()), dtype=np.int64,
                            count=arr.size)
     except KeyError as e:
-        raise KeyError(f"no {what} named {e.args[0]!r}") from None
+        from polariseq import _checks
+
+        raise _checks.InputError(f"no {what} named {e.args[0]!r}.{_checks.suggest(e.args[0], lookup)}") from None
+
+
+def _source_gene_names(adata: Any) -> list[str] | None:
+    """Every gene of the files the data were read from (``None``: unknown), so
+    a missing gene can be told apart from one an earlier step removed."""
+    src = getattr(adata, "_source", None)
+    if not src:
+        return None
+    try:
+        names: list[str] = []
+        for p in src["paths"]:
+            names.extend(str(g) for g in scan_h5ad_genes(os.fspath(p))["var_names"])
+        return names
+    except Exception:  # noqa: BLE001  (moved or unreadable: no distinction made)
+        return None
+
+
+def _add_included(adata: Any, X: Any, hvg_mask: np.ndarray, forced: np.ndarray,
+                  floor: int) -> np.ndarray:
+    """The ranking's genes with the genes asked for added; records which, and
+    warns about any detected in too few cells to carry much signal."""
+    import warnings
+
+    names = [str(adata.var_names[i]) for i in forced]
+    added = [n for n, i in zip(names, forced, strict=True) if not hvg_mask[i]]
+    mask = hvg_mask.copy()
+    mask[forced] = True
+    included = np.zeros(mask.size, dtype=bool)
+    included[forced] = True
+    adata.var["highly_variable"] = mask
+    adata.var["included"] = included
+    adata.uns["hvg"].update(include=names, include_added=added, n_selected=int(mask.sum()))
+    # How many cells express each gene asked for: from the gene filter when it ran, else counted.
+    if "n_cells" in adata.var:
+        cells = np.asarray(adata.var["n_cells"])[forced]
+    elif _is_sparse(X):
+        cells = np.bincount(np.asarray(X[:, forced].indices, dtype=np.int64), minlength=forced.size)
+    else:
+        cells = None
+    if cells is not None:
+        low_at = floor if floor > 0 else int(0.01 * adata.n_obs)
+        low = [f"{n} ({int(c):,} cells, {c / max(adata.n_obs, 1):.2%})"
+               for n, c in zip(names, cells, strict=True) if c <= low_at]
+        if low:
+            warnings.warn(f"include: detected in {low_at:,} cells or fewer, so they carry little "
+                          f"signal (kept as asked): {', '.join(low)}", stacklevel=3)
+    return mask
+
+
+def _all_gene_names(adata: Any) -> list[str]:
+    """Every gene of the source files, in the order the data were read in."""
+    src = adata._source
+    paths = [os.fspath(p) for p in src["paths"]]
+    if src.get("maps") is None:
+        return [str(g) for g in scan_h5ad_genes(paths[0])["var_names"]]
+    names = [list(scan_h5ad_genes(p)["var_names"]) for p in paths]
+    modes = [getattr(adata, "genes", None)] if getattr(adata, "genes", None) else ["intersection", "union"]
+    for mode in modes:
+        merged, _ = _merged_genes(names, mode, paths)
+        if len(merged) == int(src["n_cols"]):
+            return merged
+    raise ValueError("the source files' genes no longer give the matrix's genes: did a file change?")
+
+
+def _from_counts(adata: Any, name: str, genes: str) -> Any:
+    """See :meth:`AnnData.from_counts`."""
+    import copy as _copy
+    import re
+
+    from polariseq import _checks
+
+    if not re.fullmatch(r"[\w.+-]+", str(name)) or str(name).startswith("."):
+        raise ValueError(f"from_counts: an analysis is named with letters, digits and . _ + - only, "
+                         f"not {name!r}")
+    if genes not in ("all", "current"):
+        raise ValueError(f"from_counts: genes must be 'all' or 'current', not {genes!r}")
+    if name == getattr(adata, "analysis", None):
+        raise ValueError(f"from_counts: {name!r} is this analysis's own name; give the new one "
+                         "another, so their results stay apart")
+    X = adata._X if isinstance(adata, LazyAnnData) else adata.X
+    src = getattr(adata, "_source", None)
+    rows = getattr(adata, "_rows", None)
+    cols = getattr(adata, "_cols", None) if genes == "current" else None
+    if _is_disk(X):
+        n_file, g_file = X.file_shape
+        col_keep = (np.asarray(X.col_mask(), dtype=bool) if genes == "current"
+                    else np.ones(g_file, dtype=bool))
+        new_x = X.subset(None, None)
+        new_x.restore_view(np.ascontiguousarray(X.row_mask(), dtype=bool),
+                           np.ascontiguousarray(col_keep), None, False)
+    elif src is not None and all(str(p).endswith(".h5ad") for p in src["paths"]):
+        from polariseq._state import _read_source, _replay
+
+        paths = [os.fspath(p) for p in src["paths"]]
+        for p in paths:
+            _checks.input_file(p, what="from_counts")
+        new_x = _read_source(src, paths)
+        if new_x is None:
+            raise ValueError(f"from_counts: {paths[0]} holds a dense matrix; read it with "
+                             "ps.read_h5ad to analyze it again")
+        new_x = _replay(new_x, rows, cols, [])
+    elif getattr(adata, "_xlog", None) == [] and (genes == "current" or cols is None):
+        new_x = X.copy() if hasattr(X, "copy") else np.array(X)  # still the counts as read
+    else:
+        raise ValueError("from_counts needs the raw counts: this object's matrix was changed and "
+                         "it has no source .h5ad to read them from again (made from an array, or "
+                         "read from 10x files). Read the data with ps.read_h5ad, or call "
+                         "from_counts before normalizing")
+    if genes == "all":
+        var_names = _all_gene_names(adata) if src is not None else list(map(str, adata.var_names))
+    else:
+        var_names = list(map(str, adata.var_names))
+    # the files' own gene columns; what the analysis computed per gene stays behind
+    file_var = {}
+    if src is not None and src.get("maps") is None:
+        with contextlib.suppress(Exception):
+            file_var = _read_frame(os.fspath(src["paths"][0]), "var")
+    if genes == "all":
+        var = dict(file_var)
+    else:
+        var = {k: _take(v, slice(None)) for k, v in adata.var.items() if k in file_var}
+    derived = getattr(adata, "_derived", None) or set()
+
+    def own(v: Any) -> Any:
+        return v.copy() if hasattr(v, "copy") else _take(v, slice(None))
+
+    new = _copy.copy(adata)
+    if isinstance(new, LazyAnnData):
+        new._temp_files, new._mmap_handles, new._closed = [], [], False
+        new._X, new._materialized = new_x, True
+        new._n_vars = len(var_names)
+    else:
+        new._X = new_x
+    new.obs = {k: own(v) for k, v in adata.obs.items() if k not in derived}
+    new.var = var
+    new.obs_names, new.var_names = list(adata.obs_names), var_names
+    new.obsm, new.obsp = {}, {}
+    new.uns = {k: v for k, v in adata.uns.items() if k == "scrublet"}  # scored from the counts
+    new._rows = None if rows is None else np.array(rows)
+    new._cols = None if cols is None else np.array(cols)
+    new._xlog = [] if not _is_disk(new_x) else None
+    new._derived = set()
+    new.analysis = str(name)
+    return new
+
+
+def _derived(adata: Any, key: str) -> None:
+    """Record that ``obs[key]`` was derived by the analysis (see ``AnnData._derived``)."""
+    if getattr(adata, "_derived", None) is None:
+        adata._derived = set()
+    adata._derived.add(key)
+
+
+def _set_x(adata: Any, value: Any) -> None:
+    """Give ``adata`` a subset of its own matrix: the values are unchanged, so
+    the record of the steps that made them stays (see ``AnnData._xlog``)."""
+    log = getattr(adata, "_xlog", None)
+    adata.X = value
+    adata._xlog = log
+
+
+def _log_x(adata: Any, op: dict[str, Any]) -> None:
+    """Record a step that rewrote the values of an in-memory sparse matrix,
+    with the source genes it saw (``None``: all)."""
+    log = getattr(adata, "_xlog", None)
+    if log is not None:
+        cols = getattr(adata, "_cols", None)
+        log.append({**op, "cols": None if cols is None else np.asarray(cols, dtype=np.int64)})
 
 
 def _keep_positions(held: np.ndarray | None, pos: np.ndarray | None) -> np.ndarray | None:
@@ -3781,7 +4338,10 @@ def _subset(adata: Any, rows: np.ndarray | None, cols: np.ndarray | None) -> Ann
     new._source = getattr(adata, "_source", None)
     new._rows = _keep_positions(getattr(adata, "_rows", None), rows)
     new._cols = _keep_positions(getattr(adata, "_cols", None), cols)
-    for attr in ("name", "batch_key", "labels"):
+    log = getattr(adata, "_xlog", None)
+    new._xlog = None if log is None or _is_disk(X) else list(log)
+    new._derived = set(getattr(adata, "_derived", None) or ())
+    for attr in ("name", "batch_key", "labels", "analysis"):
         if hasattr(adata, attr):
             setattr(new, attr, getattr(adata, attr))
     return new
@@ -3919,8 +4479,10 @@ def _merged_genes(var_lists: list[list[str]], genes: str,
 def _plan_datasets(paths: Any, genes: str) -> tuple[list[dict[str, Any]], int]:
     """Each dataset's shape and genes kept when read as one, and the merged
     gene count: from the files' metadata and gene names, not their cells."""
+    from polariseq import _checks
+
     sources = _sources(paths)
-    scans = [scan_h5ad_genes(p) for _, p in sources]
+    scans = [scan_h5ad_genes(_checks.input_file(p, what="plan")) for _, p in sources]
     names, maps = _merged_genes([s["var_names"] for s in scans], genes, [p for _, p in sources])
     return [{"label": k, "path": p, "n_cells": int(s["n_obs"]), "n_genes": int(s["n_vars"]),
              "nnz": int(s["nnz"]), "genes_kept": int((m != _DROPPED).sum())}
