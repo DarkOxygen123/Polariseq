@@ -112,8 +112,18 @@ def test_out_of_core_the_copy_is_reopened_with_its_view(proj, source) -> None:
 def test_a_deleted_copy_is_made_again(proj, source) -> None:
     a = analyze(ps.read_h5ad(str(source), mode="out-of-core"))
     a.save("ooc")
+    # what to compare, in memory: on Windows the copy cannot be deleted while an analysis maps it
+    want_x, want_pca = matrix(a.X), np.array(a.obsm["X_pca"])
+    want_leiden, want_view = np.array(a.obs["leiden"]), (a.X.row_mask(), a.X.col_mask())
+    del a
+    gc.collect()
     proj.clean("matrix")
-    same(a, ps.load(proj.path, "ooc"))
+    b = ps.load(proj.path, "ooc")
+    assert (matrix(b.X) != want_x).nnz == 0
+    np.testing.assert_array_equal(np.asarray(b.obsm["X_pca"]), want_pca)
+    np.testing.assert_array_equal(np.asarray(b.obs["leiden"]), want_leiden)
+    np.testing.assert_array_equal(b.X.row_mask(), want_view[0])
+    np.testing.assert_array_equal(b.X.col_mask(), want_view[1])
 
 
 def test_several_files_in_memory(proj, tmp_path) -> None:
