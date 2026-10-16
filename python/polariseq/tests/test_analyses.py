@@ -8,6 +8,8 @@ and run with the same settings it gives the same result as the first.
 
 from __future__ import annotations
 
+import gc
+
 import numpy as np
 import polariseq as ps
 import pytest
@@ -115,7 +117,10 @@ def test_a_named_analysis_saves_and_loads(proj, mode) -> None:
 
 def test_clean_results_includes_the_analyses(proj) -> None:
     a = first("out-of-core")
-    rest(a.from_counts("x"))
+    b = a.from_counts("x")
+    rest(b)
+    del a, b   # Windows deletes no file an analysis still maps
+    gc.collect()
     assert proj.clean("results") > 0
     assert not list((proj.path / "runs").glob("*/analyses/*/results"))
 
