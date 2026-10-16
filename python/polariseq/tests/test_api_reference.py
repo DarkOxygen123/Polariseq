@@ -18,5 +18,6 @@ def test_every_argument_is_described() -> None:
 
 @pytest.mark.skipif(not API.exists(), reason="docs/API.md is not in this checkout")
 def test_the_reference_is_current() -> None:
-    assert API.read_text() == reference(), (
+    # UTF-8 whatever the platform: Windows would read it in its locale's code page
+    assert API.read_text(encoding="utf-8") == reference(), (
         "docs/API.md is out of date: python -m polariseq._api_reference > docs/API.md")
