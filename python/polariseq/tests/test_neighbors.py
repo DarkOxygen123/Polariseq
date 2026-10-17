@@ -132,8 +132,11 @@ def test_graph_steps_give_the_same_from_memory_and_from_mapped_files(proj) -> No
     assert loaded.uns["leiden"]["inputs"] == loaded.uns["umap"]["inputs"] == "loaded"
     ps.set_budget(ram_gb=0.01)  # below any step's inputs: read in place
     mapped = _graph_steps("mapped", emb)
-    assert mapped.uns["neighbors"]["inputs"] == {"embedding": "mapped", "distances": "mapped"}
-    assert mapped.uns["leiden"]["inputs"] == mapped.uns["umap"]["inputs"] == "mapped"
+    # in place, from local disk or (a cluster's scratch) a network file system
+    where = mapped.uns["leiden"]["inputs"]
+    assert where in ("mapped", "mapped-network")
+    assert mapped.uns["neighbors"]["inputs"] == {"embedding": where, "distances": where}
+    assert mapped.uns["umap"]["inputs"] == where
     for run in (loaded, mapped):
         assert isinstance(run.obsm["X_umap"], np.memmap)
         np.testing.assert_array_equal(run.obsp["connectivities"].data, ref.obsp["connectivities"].data)

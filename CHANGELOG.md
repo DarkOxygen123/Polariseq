@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.2.2 (2026-10-18)
+
+- **Cell type annotation, rewritten.** `ps.tl.auto_annotate` scores every cell for every cell type
+  with the published ScType and Cell Marker Accordion methods (markers standardized over the cells,
+  weighted by how many sources name them and how few types share them, genes a type should not
+  express counted against it), in the Rust core in two streamed passes, in memory or out of core. It
+  reads every gene of the source files, so markers outside the selected genes count. It returns a
+  table per cluster: the name and its Cell Ontology term, the score, the share of the cluster's cells
+  supporting it, the runner-up, and groups of cells inside the cluster scoring for another type (rare
+  populations); every cell also gets its own best type. A cluster no type fits stays `unassigned`;
+  two types scoring within 5% of each other give their shared parent type. `source=` chooses the
+  markers: shipped, Polariseq's curated list and the Human Protein Atlas single cell types (the
+  default, both), and MSigDB C8; fetched once on request, the Cell Marker Accordion, CellMarker 2.0,
+  PanglaoDB and ScType (`pip install 'polariseq[markers]'`); your own with `markers=` (a dict, a
+  table or a `.gmt`/`.csv` file, negative markers allowed). `tissue=` narrows to a tissue, keeping
+  blood and immune types; mouse data are mapped through MGI orthologs. `ps.marker_table` shows a
+  source's markers. Against published labels (PBMC 3k, Kang et al. 2018, the Cao et al. 2020 fetal
+  atlas organ by organ, scored on the Cell Ontology), the new default names 73% of cells in the
+  right lineage on average over the three (77% with `tissue=`), against 34% for 0.2.0's PanglaoDB
+  scoring, and 51% of the cells of rare types (under 1% of an organ's cells) against 24%; with the
+  Accordion added (`source=("curated", "hpa", "accordion")`), 80% and 69%
+  (`benchmarks/annotation/annot_bench.py`). PanglaoDB is no longer shipped (`source="panglaodb"`
+  fetches it); `method=` is still read.
+
 ## 0.2.1 (2026-10-17)
 
 - **Saved analyses.** `adata.save(name)` keeps an analysis in the project folder

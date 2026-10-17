@@ -21,6 +21,7 @@
     clippy::cast_possible_wrap
 )]
 
+pub mod annotate;
 pub mod backend;
 pub mod clustering;
 pub mod compressed;

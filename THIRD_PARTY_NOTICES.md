@@ -33,6 +33,7 @@ their packages carry.
 | Scanpy | BSD-3-Clause | `preprocess.rs`, `pca.rs`, `de.rs`, `umap.rs`, `python/polariseq` |
 | CWTS networkanalysis | MIT | `leiden.rs` |
 | harmony-pytorch | BSD-3-Clause | `harmony.rs` |
+| Cell Marker Accordion | MIT | `annotate.rs`, `python/polariseq/_annotate.py` |
 
 The Rust modules are in `crates/polariseq-core/src/`.
 
@@ -156,6 +157,20 @@ Copyright (c) 2021-present Genentech, Inc.
 tallies fixed, the objective and its convergence windows, and the
 mixture-of-experts ridge correction per cluster.
 
+### Cell Marker Accordion
+
+<https://github.com/TebaldiLab/cellmarkeraccordion>. MIT, Copyright (c) 2025
+Laboratory of RNA and Disease Data Science (RDDS).
+
+`tl.auto_annotate` weighs markers as the Accordion's `accordion()` does
+(Busarello et al. 2025): the evidence consistency score `log10(n) + 1`, the
+specificity score rescaled from the number of types sharing a marker onto the
+evidence range and log-transformed the same way, their product as a marker's
+weight, a type's best-weighted markers kept (30 by default), the positive and
+negative sums each divided by the square root of their weights, and a cluster
+left unassigned when its 75th percentile score is not above zero
+(`python/polariseq/_annotate.py`, scores in `annotate.rs`).
+
 ## Methods implemented from publications
 
 These steps give the same answers as established tools whose code is under the
@@ -178,6 +193,39 @@ documentation leaves a detail open, it was settled by comparing outputs.
   `harmony_options`) describes them; the diversity weight and the centroids
   taken from the ridge intercepts were chosen by comparing corrections with
   harmonypy 2.0.2.
+- **Marker scores** (`annotate.rs`, `python/polariseq/_annotate.py`): ScType's
+  scoring (Ianevski et al. 2022): each marker standardized over the cells, a
+  cell's score the sum over its positive markers less the sum over its
+  negative ones, each divided by the square root of their number, and a
+  cluster's score taken over its cells. ScType's code and marker database are
+  under the GNU GPL and are not part of Polariseq; `source="sctype"` downloads
+  the database to the user's own cache when asked.
+
+## Data shipped with Polariseq
+
+The marker tables in `python/polariseq/data/markers/` are made from three open
+sources by `scripts/build_marker_tables.py`, which keeps the genes, cell types,
+tissues and ontology terms Polariseq scores with and nothing else. Changes:
+rows reformatted into one table per source, cell type names mapped to Cell
+Ontology terms, tissues mapped to Polariseq's tissue names, tumour sets left
+out.
+
+- **Human Protein Atlas** (`hpa.tsv.gz`): the single cell type specificity of
+  each gene, version 25.1, <https://www.proteinatlas.org>. CC BY 4.0. Karlsson
+  M. et al., A single-cell type transcriptomics map of human tissues, Sci. Adv.
+  7, eabh2169 (2021).
+- **MSigDB C8 cell type signature gene sets** (`msigdb_c8.tsv.gz`), version
+  2025.1, <https://www.gsea-msigdb.org>. CC BY 4.0. Liberzon A. et al., The
+  Molecular Signatures Database hallmark gene set collection, Cell Syst. 1,
+  417 (2015); the studies each set comes from are named in its set name.
+- **Cell Ontology** (`cell_ontology.tsv.gz`): term ids, names, exact
+  synonyms and parents, from `cl-basic.obo`, <https://obophenotype.github.io/cell-ontology/>.
+  CC BY 4.0. Diehl A. D. et al., The Cell Ontology 2016, J. Biomed. Semantics
+  7, 44 (2016).
+
+Downloaded on request into the user's cache, never shipped (their terms are
+their own): the Cell Marker Accordion database, CellMarker 2.0, PanglaoDB, the
+ScType database, and the MGI human-mouse ortholog table.
 
 ## Licence texts
 
@@ -562,4 +610,30 @@ SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
 CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+### Cell Marker Accordion licence
+
+```text
+MIT License
+
+Copyright (c) 2025 Laboratory of RNA and Disease Data Science (RDDS)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```

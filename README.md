@@ -104,8 +104,10 @@ with NumPy and pandas as its only Python dependencies:
 - **Analysis:** quality control, cell and gene filters, normalization, gene selection, PCA, the neighbour
   graph, Leiden and Louvain clustering, UMAP, the Paris hierarchy and PAGA; `ps.process_diskbacked` runs
   it in one call.
-- **Biology:** marker genes (`ps.get.markers`), gene scores, cluster annotation from built-in marker lists,
-  merging and subclustering, pseudotime.
+- **Biology:** marker genes (`ps.get.markers`), gene scores, cell type names for clusters from marker
+  databases with a score, a confidence and Cell Ontology terms (`ps.tl.auto_annotate`: Human Protein
+  Atlas and MSigDB built in; Cell Marker Accordion, CellMarker, PanglaoDB and ScType fetched on request;
+  or your own markers), merging and subclustering, pseudotime.
 - **Several samples:** doublet detection (Scrublet), integration (Harmony), and comparisons between
   conditions with donors as replicates.
 - **Results:** cell and gene tables, clusters, UMAP coordinates and marker lists as pandas and NumPy
@@ -121,10 +123,11 @@ SciPy matrices come with the extras below; a function that needs one names the e
 | `plot` | Matplotlib | draw every figure with `ps.pl`: UMAPs by cluster or gene, dot plots, violins, heatmaps, volcano plots, QC and overview figures, in a light or dark theme |
 | `anndata` | AnnData, SciPy | export with `adata.to_anndata()` or to `.h5ad`, and continue in Scanpy, scVI or any tool built on AnnData |
 | `scipy` | SciPy | take results as SciPy sparse matrices (the neighbour graph in `adata.obsp`, `.to_scipy()`, `adata.sample()`) for code that expects them |
-| `celltypist` | CellTypist, AnnData, SciPy | annotate cell types with CellTypist's trained models: `ps.tl.auto_annotate(adata, method="celltypist")` |
+| `markers` | pyreadr, openpyxl | read the marker databases fetched on request: `ps.tl.auto_annotate(adata, source="accordion")` (also `"cellmarker"`, `"sctype"`) |
+| `celltypist` | CellTypist, AnnData, SciPy | annotate cell types with CellTypist's trained models: `ps.tl.auto_annotate(adata, source="celltypist")` |
 
 **Everything**, `pip install "polariseq[all] @ git+https://github.com/DarkOxygen123/Polariseq.git"`, is
-the core with every extra: Matplotlib, AnnData, SciPy and CellTypist. It suits notebook work with figures
+the core with every extra: Matplotlib, AnnData, SciPy, CellTypist, pyreadr and openpyxl. It suits notebook work with figures
 and the hand-over to Scanpy, and it is the largest install, since CellTypist brings Scanpy and
 scikit-learn.
 
@@ -274,7 +277,7 @@ python examples/01_quickstart.py
 | embedding | UMAP from a multilevel spectral start |
 | integration | Harmony (`ps.pp.harmony_integrate`) |
 | doublets | Scrublet (`ps.pp.scrublet`) |
-| biology | marker genes, gene scores, cluster annotation, merging and sub-clustering, PAGA, pseudotime |
+| biology | marker genes, gene scores, cell type annotation from marker databases (`ps.tl.auto_annotate`, `ps.marker_table`), merging and sub-clustering, PAGA, pseudotime |
 | conditions | pseudobulk differential expression with donors as replicates (`ps.tl.compare_conditions`) |
 | plots | UMAP, PCA, QC, dot plots, violins, heatmaps, volcano plots, overview figures |
 | settings | several analyses of the same cells (`adata.from_counts`), genes of your own in the selection (`include=`), agreement between analyses against the seed-to-seed noise (`ps.tl.compare_analyses`) |
@@ -317,7 +320,7 @@ If you use Polariseq, or results produced with it, cite it with the version you 
 [CITATION.cff](CITATION.cff), and GitHub's "Cite this repository" button gives it in APA and BibTeX:
 
 > Uthamkumar M, Dutta A, Basak T. Polariseq: atlas-scale single-cell analysis on the computer you have.
-> Version 0.2.1 (2026). https://github.com/DarkOxygen123/Polariseq
+> Version 0.2.2 (2026). https://github.com/DarkOxygen123/Polariseq
 
 ## License
 
