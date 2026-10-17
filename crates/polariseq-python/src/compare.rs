@@ -459,3 +459,56 @@ pub fn compare_cells<'py>(
     }
     Ok((all.into_dict(py)?, infos))
 }
+
+/// Marker-based cell type scores of every cell (see `polariseq_core::annotate`):
+/// marker gene `k` is matrix column `cols[k]`, `weights` is `markers x types`
+/// row-major (negative for genes a type should not express), `label[i]` cell
+/// `i`'s cluster (`>= n_groups`: left out of the sums). In memory or out of core.
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+pub fn marker_scores<'py>(
+    py: Python<'py>,
+    matrix: &Bound<'py, PyAny>,
+    cols: PyReadonlyArray1<'py, u32>,
+    weights: PyReadonlyArray1<'py, f32>,
+    n_types: usize,
+    label: PyReadonlyArray1<'py, u32>,
+    n_groups: usize,
+) -> PyResult<Bound<'py, PyDict>> {
+    use polariseq_core::annotate::marker_scores as score;
+    let (cols, weights, label) = (cols.as_slice()?, weights.as_slice()?, label.as_slice()?);
+    if weights.len() != cols.len() * n_types {
+        return Err(PyValueError::new_err(format!(
+            "{} weights for {} markers x {} types",
+            weights.len(),
+            cols.len(),
+            n_types
+        )));
+    }
+    let r = if let Ok(m) = matrix.cast::<PySparseMatrix>() {
+        let m = m.borrow();
+        let inner = &m.inner;
+        if cols.iter().any(|&c| c as usize >= inner.ncols) {
+            return Err(PyValueError::new_err("a marker column is out of range"));
+        }
+        py.detach(|| score(inner, cols, weights, n_types, label, n_groups))
+    } else if let Ok(d) = matrix.cast::<PyDiskMatrix>() {
+        let d = d.borrow();
+        let dm: &PyDiskMatrix = &d;
+        py.detach(|| dm.current_view(|v| score(v, cols, weights, n_types, label, n_groups)))
+    } else {
+        return Err(PyTypeError::new_err(
+            "marker_scores reads a SparseMatrix or a DiskMatrix",
+        ));
+    };
+    let d = PyDict::new(py);
+    d.set_item("group_sums", r.group_sums.into_pyarray(py))?;
+    d.set_item("group_counts", r.group_counts.into_pyarray(py))?;
+    d.set_item("group_positive", r.group_positive.into_pyarray(py))?;
+    d.set_item("best", r.best.into_pyarray(py))?;
+    d.set_item("best_score", r.best_score.into_pyarray(py))?;
+    d.set_item("second_score", r.second_score.into_pyarray(py))?;
+    d.set_item("mean", r.mean.into_pyarray(py))?;
+    d.set_item("sd", r.sd.into_pyarray(py))?;
+    Ok(d)
+}

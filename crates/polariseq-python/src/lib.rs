@@ -1560,6 +1560,7 @@ fn _polariseq(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(compare::compare_pseudobulk, m)?)?;
     m.add_function(wrap_pyfunction!(compare::compare_cells, m)?)?;
     m.add_function(wrap_pyfunction!(compare::group_means, m)?)?;
+    m.add_function(wrap_pyfunction!(compare::marker_scores, m)?)?;
     m.add_function(wrap_pyfunction!(pca_dense, m)?)?;
     m.add_function(wrap_pyfunction!(pca_sparse, m)?)?;
     m.add_function(wrap_pyfunction!(pca_sparse_scaled, m)?)?;

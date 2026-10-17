@@ -71,6 +71,11 @@ import polariseq as ps
 - **Save, don't export, to continue later** (`adata.save` / `ps.load`): the
   counts are pointed to, not copied. Export (`write_h5ad`, `to_anndata`) when
   another tool needs the data.
+- **Name cell types, then check them** (`ps.tl.auto_annotate(adata, "leiden",
+  tissue="immune")`): a table per cluster with the name, its Cell Ontology
+  term, a score, the share of cells supporting it, the runner-up and rare
+  groups inside the cluster. `source=` picks the marker database
+  (`ps.marker_table` shows one); give `tissue` when you know it.
 - **Errors name the fix**: a misspelled column, gene or file names the closest
   match; a step run too early names the step to run first.
 """
@@ -80,6 +85,45 @@ def _summary(doc: str) -> str:
     """The docstring's first paragraph."""
     paras = inspect.cleandoc(doc or "").split("\n\n")
     return " ".join(paras[0].split()) if paras and paras[0] else ""
+
+
+_SECTION = re.compile(r"^(Args|Arguments|Returns|Raises|Yields|Example|Examples|Note|Notes):\s*$")
+_ITEM = re.compile(r"^(?:[-*]|\d+[.)])\s")
+
+
+def _body(doc: str) -> str:
+    """The docstring's explanation between its first paragraph and its sections, as
+    Markdown: paragraphs joined, bullet and numbered lists kept, ``::`` blocks as code."""
+    paras = inspect.cleandoc(doc or "").split("\n\n")[1:]
+    out: list[str] = []
+    code_next = False
+    for para in paras:
+        lines = para.splitlines()
+        if not lines or _SECTION.match(lines[0].strip()):
+            break
+        if code_next:
+            out.append("```python\n" + textwrap.dedent(para).strip("\n") + "\n```")
+            code_next = False
+            continue
+        lead = ""
+        if not _ITEM.match(lines[0].lstrip()) and any(_ITEM.match(ln.lstrip()) for ln in lines[1:]):
+            first = next(i for i, ln in enumerate(lines) if i and _ITEM.match(ln.lstrip()))
+            lead, lines = _md(" ".join(" ".join(lines[:first]).split())) + "\n\n", lines[first:]
+        if _ITEM.match(lines[0].lstrip()):
+            items: list[str] = []
+            indent = len(lines[0]) - len(lines[0].lstrip())
+            for line in lines:
+                if _ITEM.match(line.lstrip()) and len(line) - len(line.lstrip()) == indent:
+                    items.append(line.strip())
+                else:
+                    items[-1] += " " + line.strip()
+            out.append(lead + "\n".join(_md(" ".join(i.split())) for i in items))
+            continue
+        text = " ".join(para.split())
+        if text.endswith("::"):
+            text, code_next = text[:-1], True
+        out.append(_md(text))
+    return "\n\n".join(out)
 
 
 def _section(doc: str, name: str) -> str:
@@ -175,6 +219,9 @@ def _entry(title: str, fn: Any, skip_first: bool = False) -> str:
     summary = _summary(doc)
     if summary:
         lines += [_md(summary), ""]
+    body = _body(doc)
+    if body:
+        lines += [body, ""]
     rows = [p for p in params if p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD)]
     if rows:
         lines += ["| argument | type | default | meaning |", "|---|---|---|---|"]
@@ -242,10 +289,10 @@ def reference() -> str:
     heading("`ps`: project, budget, planning, reading",
             "Declare the project folder and the budget first; read data with `read_h5ad` (or the 10x "
             "readers); `plan` predicts the cost before anything is read; `load` reopens a saved "
-            "analysis.")
+            "analysis; `marker_table` shows the markers `tl.auto_annotate` scores with.")
     for name in ("project", "set_budget", "budget", "resources", "plan", "max_cells", "read_h5ad",
-                 "read_10x_h5", "read_10x_mtx", "load", "process_diskbacked", "set_workflow",
-                 "workflow", "get_build_info"):
+                 "read_10x_h5", "read_10x_mtx", "load", "marker_table", "process_diskbacked",
+                 "set_workflow", "workflow", "get_build_info"):
         parts.append(_entry(f"ps.{name}", getattr(ps, name)))
 
     heading("The data object",

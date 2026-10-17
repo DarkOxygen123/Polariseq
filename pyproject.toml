@@ -6,7 +6,7 @@ build-backend = "maturin"
 
 [project]
 name = "polariseq"
-version = "0.2.1"
+version = "0.2.2"
 description = "Fast, memory-aware single-cell RNA-seq analysis, in memory or out of core, from a laptop to atlas scale"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -64,6 +64,12 @@ annotation = [  # the earlier name of `anndata`
     "anndata>=0.10",
     "scipy>=1.10",
 ]
+# The marker databases tl.auto_annotate fetches on request: the Cell Marker Accordion (.rda)
+# and CellMarker and ScType (.xlsx).
+markers = [
+    "pyreadr>=0.5",
+    "openpyxl>=3.1",
+]
 # CellTypist cell-type annotation.
 celltypist = [
     "celltypist>=1.0",
@@ -77,6 +83,8 @@ all = [
     "anndata>=0.10",
     "scipy>=1.10",
     "celltypist>=1.0",
+    "pyreadr>=0.5",
+    "openpyxl>=3.1",
 ]
 dev = [
     "pytest>=7.0",

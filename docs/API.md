@@ -2,7 +2,7 @@
 
 Every public function, with its arguments, their types and defaults, and what
 it returns. Written from the code (`python -m polariseq._api_reference`), so it
-matches the installed version: 0.2.1.
+matches the installed version: 0.2.2.
 
 ```python
 import polariseq as ps
@@ -34,13 +34,19 @@ import polariseq as ps
 - **Save, don't export, to continue later** (`adata.save` / `ps.load`): the
   counts are pointed to, not copied. Export (`write_h5ad`, `to_anndata`) when
   another tool needs the data.
+- **Name cell types, then check them** (`ps.tl.auto_annotate(adata, "leiden",
+  tissue="immune")`): a table per cluster with the name, its Cell Ontology
+  term, a score, the share of cells supporting it, the runner-up and rare
+  groups inside the cluster. `source=` picks the marker database
+  (`ps.marker_table` shows one); give `tissue` when you know it.
 - **Errors name the fix**: a misspelled column, gene or file names the closest
   match; a step run too early names the step to run first.
 
 ## `ps`: project, budget, planning, reading
 
 Declare the project folder and the budget first; read data with `read_h5ad` (or the 10x readers);
-`plan` predicts the cost before anything is read; `load` reopens a saved analysis.
+`plan` predicts the cost before anything is read; `load` reopens a saved analysis; `marker_table`
+shows the markers `tl.auto_annotate` scores with.
 
 ### `ps.project`
 
@@ -49,6 +55,8 @@ ps.project(path: str | Path) -> Project
 ```
 
 Declare the project folder of this session, creating it if needed.
+
+Everything Polariseq writes to disk from now on goes into it: the on-disk copies an out-of-core analysis reads, the intermediates, and the scratch files of running steps (the spill folder of `ps.process_diskbacked` included).
 
 | argument | type | default | meaning |
 |---|---|---|---|
@@ -90,6 +98,13 @@ ps.resources() -> Resources
 
 What this machine has: RAM (total and available), cores, spill space.
 
+`available_source` says how the available figure was obtained, because a measured number and an estimate deserve different trust:
+
+```python
+>>> ps.resources()
+Resources(ram=8.6 GB total, 3.1 GB available [vm_stat], cores=4P/8, ...)
+```
+
 ### `ps.plan`
 
 ```python
@@ -97,6 +112,8 @@ ps.plan(path: str | list[str] | dict[str, str], *, genes: str = 'intersection', 
 ```
 
 Predict what analysing `path` will cost, before running anything.
+
+Scans the file's metadata (milliseconds, no matrix data), then costs each pipeline step against the active budget and picks a storage mode.
 
 | argument | type | default | meaning |
 |---|---|---|---|
@@ -119,6 +136,13 @@ ps.max_cells(*, n_genes: int = 30000, nnz_per_cell: int = 2000, storage: str | N
 
 Largest cell count that fits the active budget, at this density.
 
+The scaling question the other way round — not "will this run?" but "how big can it get?":
+
+```python
+>>> ps.max_cells()                      # in RAM on this machine
+>>> ps.max_cells(storage="spill")       # streamed from SSD
+```
+
 | argument | type | default | meaning |
 |---|---|---|---|
 | `n_genes` | int | `30000` | Genes in the dataset. |
@@ -134,6 +158,8 @@ ps.read_h5ad(path: str | list[str] | dict[str, str], *, sparse: bool = True, laz
 ```
 
 Read a `.h5ad` file, or several as one dataset. With `lazy=True` (default), returns instantly with metadata; the data matrix materializes on first compute operation.
+
+By default, sparse X data is read into a Rust-owned `SparseMatrix` (no densification, no copy into Python). Set `sparse=False` to force a dense numpy array.
 
 | argument | type | default | meaning |
 |---|---|---|---|
@@ -186,6 +212,8 @@ ps.load(project: str | os.PathLike, name: str, *, relink: dict[str, str] | None 
 
 Open an analysis saved with `adata.save(name)`, to continue where it stopped.
 
+Declares `project` the project folder (as `project` does) and returns the object as it was saved: its cells and genes, the matrix as the steps left it (out of core the on-disk copy reopened with its filters and normalization; in memory rebuilt from the source files), and every annotation, embedding, graph and result. Large arrays are memory-mapped, so loading reads little.
+
 | argument | type | default | meaning |
 |---|---|---|---|
 | `project` | str \| os.PathLike | required | The project folder the analysis was saved in. |
@@ -194,6 +222,25 @@ Open an analysis saved with `adata.save(name)`, to continue where it stopped.
 
 **Raises:** SourceMovedError: A source file is no longer where it was; the message says where it was expected.
 
+### `ps.marker_table`
+
+```python
+ps.marker_table(source: str | list[str] | tuple[str, ...] | None = ('curated', 'hpa'), *, tissue: str | list[str] | None = None, species: str = 'human', markers: Any = None) -> Any
+```
+
+The marker genes `tl.auto_annotate` would score with, as a table.
+
+To look at a source before using it, or to start a table of your own from one (filter it, add rows, pass it back as `markers=` with `source=None`).
+
+| argument | type | default | meaning |
+|---|---|---|---|
+| `source` | str \| list[str] \| tuple[str, ...] \| None | `('curated', 'hpa')` | A marker source or a list of them: `"hpa"`, `"msigdb_c8"`, `"curated"` (shipped), `"accordion"`, `"cellmarker"`, `"panglaodb"`, `"sctype"` (downloaded once on first use). `None` with `markers`: only yours. |
+| `tissue` | str \| list[str] \| None | `None` | Keep this tissue's types (a name or a list); immune types and types found in many tissues are kept with any tissue. `None`: all. |
+| `species` | str | `'human'` | `"human"` or `"mouse"` (human-only sources mapped to mouse orthologs). |
+| `markers` | Any | `None` | Your own markers, in any form `auto_annotate` takes. |
+
+**Returns:** A DataFrame, one row per marker: `cell_type`, `gene`, `sign` (+1 expressed, -1 not expressed), `evidence` (records naming it), `strength` (the source's own ranking value, 0 when none), `tissue`, `cl_id` (Cell Ontology term), `species`, `source`.
+
 ### `ps.process_diskbacked`
 
 ```python
@@ -201,6 +248,10 @@ ps.process_diskbacked(path: str, *, n_hvg: int = 2000, n_pcs: int = 50, n_neighb
 ```
 
 Run the pipeline on a dataset that exceeds RAM, using SSD.
+
+The matrix is streamed from the file straight onto SSD (never held in memory), memory-mapped, and then processed in place: QC metrics, `filter_cells(min_genes)`, `normalize_total`, `log1p`, highly-variable genes, PCA. Only per-gene vectors and the `n_obs × n_pcs` embedding live in RAM. Neighbours and clustering then run on that embedding.
+
+These are the same kernels the in-memory pipeline uses, on a different block source, so the results match the in-memory pipeline given the same `min_genes`. The workflow (`set_workflow`) decides the gene selection, normalization and scaling: `'polariseq'` ranks genes among those detected in more than 1% of the cells, normalizes each cell again over the selected genes and standardizes each gene before PCA; `'scanpy'` follows Scanpy's steps. Before `min_genes` existed this path silently kept every cell, answering a different question than `ps.pp` on the same file.
 
 | argument | type | default | meaning |
 |---|---|---|---|
@@ -229,6 +280,12 @@ ps.set_workflow(name: str) -> None
 ```
 
 Choose the defaults of the analysis steps.
+
+`'polariseq'` (the default): genes ranked as Scanpy's seurat flavour ranks them, among the genes detected in more than 1% of the cells; in the one-call pipelines, each cell normalized again over the selected genes (to 1,000, then log, as Scarf does) and each gene standardized before PCA; UMAP from Polariseq's multilevel spectral start with a minimum distance of 0.5 and 100 rounds above 10,000 cells. On the human fetal atlas these clusters matched the published cell types far better (normalized mutual information 0.80 against 0.55) and the UMAP of 4 million cells was one coherent layout instead of 70 islands, in less time.
+
+`'scanpy'`: the steps as Scanpy defines them, as in Polariseq before: the seurat ranking over all genes, no second normalization, UMAP from the spectral start with a minimum distance of 0.1 and 500 rounds up to 10,000 cells, else 200. Use it to compare with Scanpy step for step.
+
+An argument given explicitly always wins over the workflow.
 
 | argument | type | default | meaning |
 |---|---|---|---|
@@ -286,6 +343,12 @@ adata.from_counts(name: str, *, genes: str = 'all') -> AnnData
 
 A new analysis of the same cells, starting again from their raw counts.
 
+For trying other settings on the same data (another number of genes, normalization, resolution) and comparing the results (`polariseq.tl.compare_analyses`). Nothing is copied out of core: the new analysis reads the same on-disk counts through its own view. In memory the cells' counts are read again from the files the data came from.
+
+The cells are this analysis's current cells (after quality control and any doublet removal). Their own annotations come along: the files' columns, quality metrics, doublet scores and any column you added (a clinical table). What this analysis derived from its matrix does not: clusters, scores, labels, embeddings, graphs.
+
+Each analysis keeps its results in its own folder of the project, `runs/<dataset>/analyses/<name>/`, so analyses of one dataset never replace each other's files; save each with `save`.
+
 | argument | type | default | meaning |
 |---|---|---|---|
 | `name` | str | required | The new analysis's name (letters, digits, `. _ + -`). |
@@ -300,6 +363,10 @@ adata.save(name: str, *, overwrite: bool = False) -> Any
 ```
 
 Save the analysis in the project folder, to continue it later with `load`.
+
+Nothing is exported: the counts stay where they are and are pointed to. Out of core the on-disk copy in the project is reopened with the filters and normalization recorded; in memory the matrix is rebuilt from the files it was read from, with the same kernels, so it is the same to the last bit (a matrix with no such record is stored). Results the steps keep in the project (embeddings, graphs, scores) are linked, not copied. If a source file is moved, loading stops and says where it was expected.
+
+Saved to `<project>/states/<name>/`. Opening the result in other tools needs an export: `to_anndata`.
 
 | argument | type | default | meaning |
 |---|---|---|---|
@@ -316,6 +383,8 @@ adata.to_anndata() -> Any
 
 Convert to an `anndata.AnnData`, for Scanpy and the tools built on it.
 
+`X` becomes a scipy CSR matrix (or stays a numpy array); `obs`, `var`, `obsm`, `obsp` and `uns` are carried over. The result of `process_diskbacked` never held the matrix: it converts with no `X`, its per-gene statistics in `var` indexed by gene name, and every per-cell result. Requires the `anndata` package.
+
 ### `adata.write_h5ad`
 
 ```python
@@ -323,6 +392,12 @@ adata.write_h5ad(path: str | os.PathLike, *, counts: bool = False) -> Any
 ```
 
 Write the analysis as an `.h5ad` file for other tools (Scanpy, cellxgene, R).
+
+`X` holds the matrix as the analysis left it: the normalized (and log-transformed) values of the current cells and genes, the selected genes after a gene selection with `subset=True`. Out of core it is streamed from the on-disk copy a few blocks at a time, so an atlas is written within the memory budget. Annotations, embeddings, graphs and results follow, with Scanpy's conventions (as `to_anndata`).
+
+`uns['polariseq']` points back to the raw counts: the source files (path, size, time), which of their cells (`rows`) and genes (`cols`) the file holds, and the steps that made `X`. Polariseq can start again from there; other tools ignore it. With `counts=True` the raw counts of those cells and genes are also written, as `layers['counts']`, for someone without the source files (a copy of the counts: the file grows accordingly).
+
+Needs no `anndata` package. The file is written under a temporary name and renamed when complete, so an interrupted write never leaves a broken file at `path`.
 
 | argument | type | default | meaning |
 |---|---|---|---|
@@ -338,6 +413,8 @@ adata.head(n: int = 10) -> dict
 ```
 
 Preview the first n cells — partial read, fast.
+
+Returns a dict with data/indices/indptr/n_cells/n_genes. For .h5ad this is a true partial read; 10x formats (mtx/h5) have no random-access layout, so they are materialized first (raw-count files are typically small).
 
 | argument | type | default | meaning |
 |---|---|---|---|
@@ -376,6 +453,8 @@ adata.close() -> None
 
 Release all resources: free matrix memory, close mmaps, delete temp files.
 
+After close(), the object reverts to metadata-only state. Accessing `adata.X` will re-materialize from disk.
+
 ## `ps.pp`
 
 Preprocessing, in the usual order: quality control, filters, doublets (`scrublet`, on raw counts),
@@ -389,6 +468,18 @@ ps.pp.calculate_qc_metrics(adata: AnnData, *, mito_prefix: str = 'MT-') -> None
 
 Compute per-cell and per-gene quality control metrics.
 
+Adds to `adata.obs`:
+
+- `n_counts`: total UMI counts per cell
+- `n_genes`: number of detected genes per cell
+- `pct_counts_mt`: percentage of counts from mitochondrial genes
+
+Adds to `adata.var`:
+
+- `n_cells`: number of cells expressing each gene
+- `total_counts`: total counts per gene
+- `mean_counts`: mean expression per gene
+
 | argument | type | default | meaning |
 |---|---|---|---|
 | `adata` | AnnData | required | The data container (mutated in place). |
@@ -401,6 +492,8 @@ ps.pp.filter_cells(adata: AnnData, *, min_counts: float = 0, max_counts: float =
 ```
 
 Filter cells based on QC metrics.
+
+Requires `calculate_qc_metrics` to have been run first.
 
 | argument | type | default | meaning |
 |---|---|---|---|
@@ -439,6 +532,17 @@ ps.pp.harmony_integrate(adata: AnnData, batch_key: str | list[str], *, use_rep: 
 
 Correct the PCA embedding for batch effects with Harmony.
 
+Harmony (Korsunsky et al. 2019) as R harmony 2 and harmonypy 2 run it, computed in Rust. Cells are assigned softly to clusters that are pushed to hold every batch in proportion; within each cluster a ridge regression estimates each batch's offset, and cells move back by their clusters' offsets. Clustering and correction alternate until the objective stops falling. The defaults are harmonypy's.
+
+The corrected embedding goes to `adata.obsm[key_added]` (`X_pca_harmony`, as in Scanpy) and the uncorrected one stays in `use_rep`, so mixing can be compared before and after. Build the graph on the corrected one:
+
+```python
+ps.pp.harmony_integrate(adata, "sample")
+ps.pp.neighbors(adata, use_rep="X_pca_harmony")
+```
+
+With a project the result is a memory-mapped file, and the embedding is read where it lies.
+
 | argument | type | default | meaning |
 |---|---|---|---|
 | `adata` | AnnData | required | The data container (mutated in place). |
@@ -466,6 +570,10 @@ ps.pp.highly_variable_genes(adata: AnnData, n_top_genes: int = 2000, *, flavor: 
 
 Select highly-variable genes (scanpy `pp.highly_variable_genes`).
 
+`flavor='seurat'` implements scanpy's method step for step (statistics on `expm1(X)`, log dispersion z-scored within 20 mean bins), so the selected set agrees with scanpy on the same log-normalized input. It stores `highly_variable`, `means`, `dispersions` and `dispersions_norm` in `adata.var`.
+
+`flavor='scarf'` selects genes as Scarf does (Dhapola et al. 2022): genes are binned by mean expression (200 bins), a LOWESS curve is fitted through each bin's least variable gene, and genes are ranked by their variance over that floor, among genes detected in more than `min_cells` cells (default: 1% of the cells). It skips the rarely detected genes that the seurat ranking can favour, and stores `highly_variable`, `log_mean`, `log_var`, `corrected_var` and `detected` in `adata.var`.
+
 | argument | type | default | meaning |
 |---|---|---|---|
 | `adata` | AnnData | required | The data container (mutated in place). |
@@ -485,6 +593,8 @@ ps.pp.log1p(adata: AnnData | LazyAnnData) -> None
 
 Apply `log1p` (natural log of 1+x) to `adata.X` in place.
 
+Preserves sparsity since `log1p(0) = 0`.
+
 | argument | type | default | meaning |
 |---|---|---|---|
 | `adata` | AnnData \| LazyAnnData | required | The analysis (what `ps.read_h5ad` returns); steps add their results to it in place. |
@@ -496,6 +606,8 @@ ps.pp.neighbors(adata: AnnData, n_neighbors: int = 15, *, use_rep: str = 'X_pca'
 ```
 
 Build a kNN graph from an embedding, storing it in `adata.obsp`.
+
+For datasets with > 10,000 cells, automatically switches to NN-Descent (approximate kNN) which is O(n^1.2) instead of O(n²). Set `approximate=False` to force exact kNN, or `True` to force approximate.
 
 | argument | type | default | meaning |
 |---|---|---|---|
@@ -515,6 +627,8 @@ ps.pp.normalize_total(adata: AnnData, target_sum: float = 10000.0) -> None
 
 Scale each cell's total counts to `target_sum` (scanpy `pp.normalize_total`).
 
+Operates in place on `adata.X`. Sparse-aware — keeps CSR format.
+
 | argument | type | default | meaning |
 |---|---|---|---|
 | `adata` | AnnData | required | The data container (mutated in place). |
@@ -527,6 +641,8 @@ ps.pp.pca(adata: AnnData, n_components: int = 50, *, center: bool = True, scale:
 ```
 
 Run PCA on `adata.X`, storing the embedding in `adata.obsm['X_pca']`.
+
+The Rust core adaptively chooses the algorithm: exact thin SVD for small matrices or when many components are requested, randomized SVD for large matrices with few components (7× faster than scanpy).
 
 | argument | type | default | meaning |
 |---|---|---|---|
@@ -545,6 +661,10 @@ ps.pp.renormalize(adata: AnnData, target_sum: float = 1000.0, *, log1p: bool = T
 
 Normalize the current genes' raw counts again, over those genes only.
 
+Scarf's normalization (`renormalize_subset` in its `make_graph`): after the highly variable genes are selected (with `subset=True`), each cell is scaled to `target_sum` by its total over the selected genes, then log-transformed. Scarf scales to 1,000 and then standardizes each gene, `ps.pp.pca(adata, scale=True)`. On the human fetal atlas, Scarf's genes with this normalization gave clusters that matched the published cell types as well as Scarf's own.
+
+Out of core the normalization is a view over the stored counts, so it is simply replaced. In memory the counts were rewritten when they were normalized, but `normalize_total` records each cell's total, so the values are turned back into counts in place, without a copy. Pass `counts` (an object holding the raw counts of the same cells; genes matched by name) only when the cells changed after normalizing.
+
 | argument | type | default | meaning |
 |---|---|---|---|
 | `adata` | AnnData | required | The data container (mutated in place). |
@@ -559,6 +679,12 @@ ps.pp.scrublet(adata: AnnData | LazyAnnData, *, batch_key: str | None = None, si
 ```
 
 Score each cell's chance of being a doublet, and call doublets.
+
+Scrublet (Wolock, Lopez & Klein, *Cell Systems* 2019), run in the Rust core as its reference implementation defines it: doublets are simulated by adding the counts of random pairs of cells, and each cell is scored by the share of simulated doublets among its nearest neighbours. The threshold separating doublets is found from the simulated doublets' scores unless given.
+
+Doublets form within one capture (one 10x channel), so score each on its own: pass the `obs` column that names it as `batch_key`. Scores are computed from raw counts: in memory run this before `normalize_total`; out of core the counts are read from the on-disk copy, so it can run at any point.
+
+Adds `obs['doublet_score']`, `obs['predicted_doublet']` and `uns['scrublet']` (per batch: the threshold, the detected and estimated doublet rates, and the simulated doublets' scores, which `polariseq.pl.scrublet_score_distribution` draws), under the names Scanpy's `pp.scrublet` uses. With a project folder the two columns are memory-mapped files in `runs/<name>/results/scrublet/`.
 
 | argument | type | default | meaning |
 |---|---|---|---|
@@ -600,18 +726,45 @@ Name clusters, `{"0": "CD4 T cell"}` or `{"B cell": ["4", "9"]}`; clusters given
 ### `ps.tl.auto_annotate`
 
 ```python
-ps.tl.auto_annotate(adata: AnnData, groupby: str = 'leiden', *, tissue: str | None = None, species: str = 'human', method: str = 'panglaodb') -> None
+ps.tl.auto_annotate(adata: AnnData, groupby: str = 'leiden', *, source: str | list[str] | tuple[str, ...] | None = ('curated', 'hpa'), tissue: str | list[str] | None = None, species: str | None = None, markers: Any = None, max_markers: int | None = 30, margin: float = 0.05, key_added: str = 'cell_type', unassigned: str = 'unassigned', method: str | None = None) -> Any
 ```
 
-Automatically assign cell type labels to clusters.
+Name each cluster's cell type from marker genes, with a score and a confidence.
+
+How it works, step by step (ScType, Ianevski et al. 2022, and the Cell Marker Accordion, Busarello et al. 2025):
+
+1. Markers: the chosen sources' tables (see `ps.marker_table`), narrowed to `tissue`, plus your `markers`. Ribosomal, mitochondrial and dissociation-stress genes are left out of every source. Genes are matched to the data by name, then by name in any letter case; for mouse data, human markers go through the MGI ortholog table.
+2. Weights: each marker is weighted by its evidence (how many records name it, `log10(n) + 1`) times its specificity (how few types share it), and each type keeps its `max_markers` best-weighted markers.
+3. Scores: each marker gene is standardized over all cells, on the log-normalized counts of every gene in the source files (so markers left out of the selected genes still count). A cell's score for a type is the weighted sum of its positive markers over the square root of their weights, minus the same for the genes the type should not express. The Rust core computes it in two streamed passes, in memory or out of core.
+4. Clusters: a cluster takes the type its cells score highest for on average. It stays `unassigned` when that score is not above zero or fewer than a quarter of its cells score above zero for it. When the runner-up scores within `margin` of the best, the cluster is named by their nearest shared Cell Ontology type ("T cell" for two kinds of T cell).
+5. Cells: every cell also gets its own best type (`obs['cell_type_cell']`), and a group of cells inside a cluster that scores highest for another type is listed in the table's `also` column: where a rare population hidden in a larger cluster shows.
+
+The names are a first guess, to check against the markers of each cluster (`get.markers`, a dot plot). Give `tissue` when you know it: it removes look-alike types of other organs (liver macrophages for blood monocytes). Against published labels (PBMC 3k, Kang et al. 2018, the Cao et al. 2020 fetal atlas organ by organ), the default named 73% of cells in the right lineage on average, 77% with `tissue`; adding the Accordion (`source=("curated", "hpa", "accordion")`) reached 80% (95% on blood).
+
+Marker sources (`source=`, one or a list; types merged by Cell Ontology term):
+
+- `"curated"`: a short list of canonical markers, about 40 types, with the blood subtypes (CD4 and CD8 T cells, CD14 and FCGR3A monocytes, pDCs).
+- `"hpa"`: Human Protein Atlas single cell types, 154 types in 31 tissues, including rare ones (ionocytes, tuft cells, mast cells, megakaryocyte progenitors).
+- The default, `("curated", "hpa")`: both, shipped with Polariseq.
+- `"msigdb_c8"`: MSigDB C8 cell type signatures of 22 single-cell studies, fetal and adult tissues, subtypes.
+- `"accordion"`, `"cellmarker"`, `"panglaodb"`, `"sctype"`: downloaded once on first use into the cache folder (their terms do not allow shipping them); `accordion` needs `pip install pyreadr`, `cellmarker` and `sctype` `pip install openpyxl` (both: `pip install 'polariseq[markers]'`). The Accordion, 13 databases harmonized, named blood cells best in our tests; `("curated", "hpa", "accordion")` adds it to the default.
+- `"celltypist"`: CellTypist's trained models instead of markers (`pip install celltypist`).
 
 | argument | type | default | meaning |
 |---|---|---|---|
-| `adata` | AnnData | required | The data container. |
-| `groupby` | str | `'leiden'` | Column in obs identifying clusters. |
-| `tissue` | str \| None | `None` | Restrict to one tissue's markers: `'immune'` (or `'pbmc'`, `'blood'`), `'brain'`, `'heart'`, `'lung'`, `'kidney'`, `'pancreas'`, `'liver'`, `'skin'`, `'gut'`, `'reproductive'`, or with `'panglaodb'` any PanglaoDB organ name (`'Thymus'`, `'Eye'`, ...). An unknown tissue is an error. |
-| `species` | str | `'human'` | "human" or "mouse" (used by PanglaoDB). |
-| `method` | str | `'panglaodb'` | Annotation method ('panglaodb', 'markers', or 'celltypist'). |
+| `adata` | AnnData | required | The analysis, clustered. |
+| `groupby` | str | `'leiden'` | `obs` column of the clusters. |
+| `source` | str \| list[str] \| tuple[str, ...] \| None | `('curated', 'hpa')` | Marker source(s), above (default: `("curated", "hpa")`). `None` with `markers`: only your markers. |
+| `tissue` | str \| list[str] \| None | `None` | Keep this tissue's types (a name or a list): `"immune"`, `"brain"`, `"lung"`, `"liver"`, `"kidney"`, `"heart"`, `"gut"`, `"pancreas"`, `"eye"`, `"skin"`, `"bone_marrow"`, ... (see `ps.marker_table`). Immune types and types found in many tissues are kept with any tissue. `None`: all types. |
+| `species` | str \| None | `None` | `"human"` or `"mouse"`; `None` guesses from the gene symbols. Human-only sources are mapped to mouse orthologs (MGI table, fetched once). |
+| `markers` | Any | `None` | Your own markers, added to the source's: `{"type": ["GENE", ...]}`, `{"type": {"positive": [...], "negative": [...]}}`, a DataFrame with `cell_type` and `gene` columns, or a `.gmt`/`.csv`/`.tsv` file. |
+| `max_markers` | int \| None | `30` | Each type keeps its best-weighted markers, this many (`None`: all). |
+| `margin` | float | `0.05` | Two types whose cluster scores differ by less than this fraction are named by their shared parent type (0: never). |
+| `key_added` | str | `'cell_type'` | `obs` column of the names; `{key_added}_ontology_id`, `_score`, `_cell` (each cell's own best type, for rare cells inside a cluster) and `_cell_score` are written beside it. |
+| `unassigned` | str | `'unassigned'` | The name of clusters (and cells) no type fits. |
+| `method` | str \| None | `None` | The earlier name of `source` (`"markers"`: `"curated"`). |
+
+**Returns:** One row per cluster: `cell_type`, `ontology_id`, `score` (the cells' mean), `runner_up` and its score, `support` (fraction of the cluster's cells scoring above zero for the type), `note` and `also` (groups of 10+ cells and 2%+ of the cluster scoring highest for another type, and at least half the cluster's score). Also kept in `uns['annotation']` with the mean scores of every type and the markers used.
 
 ### `ps.tl.compare_analyses`
 
@@ -620,6 +773,15 @@ ps.tl.compare_analyses(analyses: dict, key: str = 'leiden', *, labels: str | Non
 ```
 
 How far analyses of the same cells agree: the effect of their settings.
+
+For analyses made with different settings (`adata.from_counts`), compared on the cells they share (matched by name):
+
+```python
+runs = {"hvg2000": a, "hvg3000": b}
+cmp = ps.tl.compare_analyses(runs, labels="cell_type", seeds=2)
+print(cmp)                           # clusters, agreement, labels, noise
+cmp.matches[("hvg2000", "hvg3000")]  # which cluster became which
+```
 
 | argument | type | default | meaning |
 |---|---|---|---|
@@ -638,6 +800,10 @@ ps.tl.compare_conditions(adata: AnnData | LazyAnnData, condition_key: str, refer
 ```
 
 Compare conditions within each cell type: which genes change, and how much.
+
+With `sample_key` (recommended), cells are summed per replicate (for example the donor), condition and cell type, and the sums are tested as bulk samples, as edgeR and limma test them (`filterByExpr`, TMM, `limma-trend`; reproduced in the Rust core and checked against edgeR 4.10 and limma 3.68). The replicates are the unit of evidence, so the p-values do not grow with the number of cells. A replicate measured under several conditions (a donor's cells before and after treatment) is compared with itself: the design blocks on it. The raw counts are read wherever they are: the matrix while it is raw, the on-disk copy, or, once normalized in memory, the files the data came from.
+
+Without `sample_key`, each condition's cells are compared with the reference's by Welch's t-test on the normalized values, as Scanpy's `rank_genes_groups(method="t-test")`. Cells of one donor are not independent, so these p-values overstate the evidence; use them to explore, and replicates to conclude.
 
 | argument | type | default | meaning |
 |---|---|---|---|
@@ -661,6 +827,8 @@ ps.tl.dpt(adata: AnnData, root: int = 0) -> None
 
 Compute diffusion pseudotime from a root cell.
 
+Uses Dijkstra shortest path on the kNN graph. Stores per-cell pseudotime in `adata.obs['dpt_pseudotime']`.
+
 | argument | type | default | meaning |
 |---|---|---|---|
 | `adata` | AnnData | required | The data container. |
@@ -673,6 +841,17 @@ ps.tl.leiden(adata: AnnData, resolution: float = 1.0, *, seed: int = 0, key_adde
 ```
 
 Run community detection on the neighbor graph.
+
+Algorithms:
+
+- `'leiden'`: full Leiden (Traag et al. 2019), the algorithm of the authors' CWTS implementation, deterministic per seed
+- `'fast'`: multi-level Louvain on the same engine (opt-in)
+- `'igraph'`: igraph's C Leiden on the same weighted graph (requires the optional python-igraph package); the reference
+- `'auto'` (default): Leiden at every scale
+
+All methods run on the fuzzy connectivity graph (`obsp['connectivities']`, computed by `pp.neighbors`), so their reported modularities are directly comparable.
+
+Requires `pp.neighbors` to have been run first.
 
 | argument | type | default | meaning |
 |---|---|---|---|
@@ -706,6 +885,8 @@ ps.tl.paga(adata: AnnData, groupby: str = 'leiden') -> None
 
 Compute PAGA (partition-based graph abstraction).
 
+Creates a cluster-level connectivity graph showing relationships between cell populations. Stores in `adata.uns['paga']`.
+
 | argument | type | default | meaning |
 |---|---|---|---|
 | `adata` | AnnData | required | The data container. |
@@ -718,6 +899,12 @@ ps.tl.paris(adata: AnnData, n_clusters: int | None = None, *, balanced: bool = F
 ```
 
 Paris hierarchical clustering of the neighbour graph.
+
+Paris (Bonald et al. 2018) builds the whole cluster hierarchy of `obsp['connectivities']` in one pass: a dendrogram in which every cut is a clustering, from one cluster down to single cells. Coarse types and their sub-types are then cuts of the same tree, without clustering again. The dendrogram (`(n - 1) x 4`: children, height, size, as scipy's `linkage`) is stored in `uns[key_added]['dendrogram']` and reused while the graph is unchanged, so clusterings at many resolutions cost one hierarchy.
+
+With `n_clusters`, the labels of a straight cut into (at least) that many clusters go to `obs[key_added]` (0-based, by decreasing size). With `balanced=True`, Scarf's balanced cut: clusters of at most `max_size` cells, whose two halves are joined only while their heights stay within a factor `max_distance_fc` once both exceed `min_size` cells.
+
+The dendrogram is identical to scikit-network's `Paris` and the balanced cut to Scarf's (`tests/test_paris.py`).
 
 | argument | type | default | meaning |
 |---|---|---|---|
@@ -738,6 +925,8 @@ ps.tl.rank_genes_groups(adata: AnnData, groupby: str = 'leiden', *, groups: list
 
 Rank genes by differential expression per group.
 
+Each group is compared with all other cells (`reference="rest"`) or with one group (`reference="control"`) by Welch's t-test, as Scanpy's `rank_genes_groups(method="t-test")`. Results go to `adata.uns['rank_genes_groups']`, one entry per group. To compare conditions within cell types with replicates, use `compare_conditions`.
+
 | argument | type | default | meaning |
 |---|---|---|---|
 | `adata` | AnnData | required | The data container (mutated in place). |
@@ -753,6 +942,8 @@ ps.tl.score_genes(adata: AnnData, gene_list: list[str], score_name: str | None =
 ```
 
 Score cells by mean expression of a gene set.
+
+Computes per-cell mean expression of the genes in `gene_list`, normalized by the mean expression of a random control gene set (Seurat's AddModuleScore approach).
 
 | argument | type | default | meaning |
 |---|---|---|---|
@@ -785,6 +976,8 @@ ps.tl.umap(adata: AnnData, *, min_dist: float | None = None, spread: float = 1.0
 ```
 
 Run UMAP on the neighbor graph, storing the 2D embedding in `adata.obsm['X_umap']`.
+
+Requires `pp.neighbors` to have been run first.
 
 | argument | type | default | meaning |
 |---|---|---|---|
@@ -823,6 +1016,8 @@ ps.get.pseudobulk(adata: AnnData | LazyAnnData, sample_key: str, *, groupby: str
 ```
 
 Raw counts summed per replicate (and per cell type and condition).
+
+The table edgeR, DESeq2 or limma test: one row per combination of `groupby`, `condition_key` and `sample_key` with at least `min_cells` cells, the gene counts summed, and the number of cells in `obs['n_cells']`. The counts are summed in the Rust core from wherever the raw counts are held (see `tl.compare_conditions`); with a project folder the result is a memory-mapped file. Pass the result's `to_anndata()` to pydeseq2, or write its `X` for R.
 
 | argument | type | default | meaning |
 |---|---|---|---|
@@ -880,6 +1075,8 @@ ps.pl.compare_analyses(analyses: dict, key: str = 'leiden', *, basis: str = 'X_u
 
 Each analysis's clusters side by side, on one embedding.
 
+The cells are placed where the first analysis holding `basis` places them (matched by name), so the panels differ only by how each analysis grouped the same cells; each title gives the analysis's clusters and its adjusted Rand index with the first analysis.
+
 | argument | type | default | meaning |
 |---|---|---|---|
 | `analyses` | dict | required | `{name: analysis}`, as for `ps.tl.compare_analyses`. |
@@ -899,6 +1096,8 @@ ps.pl.dotplot(adata: AnnData, markers: list[str] | None = None, groupby: str = '
 
 Dot plot: size = fraction expressing, colour = mean expression.
 
+Genes may be given as `markers=` or, for scanpy compatibility, `var_names=`.
+
 | argument | type | default | meaning |
 |---|---|---|---|
 | `adata` | AnnData | required | The analysis (what `ps.read_h5ad` returns); steps add their results to it in place. |
@@ -916,6 +1115,8 @@ ps.pl.embedding(adata: AnnData, basis: str = 'X_umap', color: str | list[str] | 
 
 Scatter any 2-D embedding in `obsm`.
 
+`umap` and `pca` are thin wrappers over this; use it directly for a basis they do not cover (`X_tsne`, a custom projection). The leading `X_` is optional: `basis="umap"` and `basis="X_umap"` both work.
+
 | argument | type | default | meaning |
 |---|---|---|---|
 | `adata` | AnnData | required | The analysis (what `ps.read_h5ad` returns); steps add their results to it in place. |
@@ -929,6 +1130,8 @@ ps.pl.fold_changes(result: Any, genes: list[str] | None = None, *, condition: st
 ```
 
 Which cell types respond: log2 fold changes, genes against cell types.
+
+`genes` defaults to the `n_genes` most significant of each cell type. A dot marks `adj_p_value < alpha`; a hatched cell, a gene not tested there (too little expression in that cell type).
 
 | argument | type | default | meaning |
 |---|---|---|---|
@@ -955,6 +1158,8 @@ ps.pl.heatmap(adata: AnnData, markers: list[str] | None = None, groupby: str = '
 ```
 
 Heatmap of z-scored marker expression across groups.
+
+Genes may be given as `markers=` or, for scanpy compatibility, `var_names=`.
 
 | argument | type | default | meaning |
 |---|---|---|---|
@@ -1009,6 +1214,8 @@ ps.pl.overview_data(adata: AnnData, *, cluster_key: str = 'leiden', qc_before: d
 
 The numbers behind the figures of `overview`, as plain Python values.
 
+`qc`: for each metric, the bin edges (evenly spaced on a log scale, as drawn), the number of cells in each bin before filtering (when `qc_before` is given) and among the cells kept, the threshold and how many cells fall below it; `cluster_sizes`; `pca_variance_ratio`; and the number of cells in the embedding. Written next to the figures as `figure_data.json`.
+
 | argument | type | default | meaning |
 |---|---|---|---|
 | `adata` | AnnData | required | The analysis (what `ps.read_h5ad` returns); steps add their results to it in place. |
@@ -1061,6 +1268,10 @@ ps.pl.qc_distributions(adata: AnnData, keys: tuple | list = ('n_genes', 'n_count
 
 Distributions of per-cell quality metrics, from every cell.
 
+Counts and detected genes span orders of magnitude, so the bins are spaced evenly on a log scale (a linear histogram on a log axis collapses the bulk of the cells into a few wide blocks). Nothing is sampled: a histogram of tens of millions of values is one pass. The median is marked, and so is any filter threshold passed in `thresholds` (`{"n_genes": 200}`).
+
+`adata` holds the cells that were kept. To show the ones a threshold removed, pass their metrics from before filtering in `before` (`{"n_genes": values, "n_counts": values}`, one value per cell, read right after `calculate_qc_metrics`): they are drawn in grey under the kept cells, and the subtitle counts what was removed. Without it a threshold line sits at the edge of the data and cuts nothing.
+
 | argument | type | default | meaning |
 |---|---|---|---|
 | `adata` | AnnData | required | The analysis (what `ps.read_h5ad` returns); steps add their results to it in place. |
@@ -1080,6 +1291,15 @@ ps.pl.rank_genes_groups(adata: AnnData, groups: list[str] | None = None, n_genes
 ```
 
 Top marker genes per cluster, ranked, one panel per group.
+
+Reads what `ps.tl.rank_genes_groups` wrote. The y axis is the t-statistic, so panel heights are comparable within a group but not necessarily across them — pass `sharey=True` if you want them forced onto one scale, at the cost of squashing the weaker clusters.
+
+:
+
+```python
+ps.tl.rank_genes_groups(adata, groupby="leiden")
+ps.pl.rank_genes_groups(adata, n_genes=8)
+```
 
 | argument | type | default | meaning |
 |---|---|---|---|
@@ -1118,6 +1338,8 @@ ps.pl.scrublet_score_distribution(adata: AnnData, *, log: bool = True, show: boo
 
 Doublet scores of the cells and of the simulated doublets, per batch.
 
+The threshold `ps.pp.scrublet` chose (dashed) should sit in the valley between the simulated doublets' two modes; if it does not, pass one with `ps.pp.scrublet(..., threshold=...)`. Cells are drawn on a log scale, where the few doublets would otherwise vanish beside the singlets.
+
 | argument | type | default | meaning |
 |---|---|---|---|
 | `adata` | AnnData | required | The analysis (what `ps.read_h5ad` returns); steps add their results to it in place. |
@@ -1132,6 +1354,16 @@ ps.pl.set_theme(name: str = 'paper', **overrides: Any) -> None
 ```
 
 Set the global theme, optionally overriding individual keys.
+
+Presets: `paper` (default, dense and small for figures), `notebook`, `talk` (large type for slides), `dark`, `print`, and `classic` (the look of Polariseq 0.2.0, kept so figures made with it draw the same). Larger type comes with larger figures, so nothing collides.
+
+Any theme key may be overridden:
+
+```python
+ps.pl.set_theme("dark", point_scale=2.0, dpi=200)
+```
+
+Themes reset from the `paper` baseline each time, so switching between them does not accumulate the previous one's overrides.
 
 | argument | type | default | meaning |
 |---|---|---|---|
@@ -1162,6 +1394,32 @@ ps.pl.umap(adata: AnnData, color: str | None = None, ax: Any | None = None, size
 
 UMAP scatter — calm palette, density-ordered, optional on-data labels.
 
+`color` accepts an obs column, a gene name, or a **list of either**, in which case a grid of panels is drawn (`ncols=` to control the shape):
+
+```python
+ps.pl.umap(adata, color=["leiden", "CD3E", "LYZ", "MS4A1"])
+```
+
+Extra attributes: `subtitle, caption, legend_title, palette, alpha, frame, colorbar, on_data (print category names on clusters), groups (highlight a subset, grey the rest), ncols, figsize, dpi`.
+
+Labelling groups (`labels=`), chosen per group:
+
+```python
+ps.pl.umap(adata, color="cell_type", labels="number")     # numbered discs, names in the legend
+ps.pl.umap(adata, color="cell_type", labels="name")       # names on the groups
+ps.pl.umap(adata, color="cell_type", labels="callout")    # names outside, joined by lines
+ps.pl.umap(adata, color="cell_type", labels="auto",       # numbers, callouts for small groups
+           label_style={"Platelet": "callout", "B cell": "name"},  # per-group choice
+           label_groups=["B cell", "CD4 T cell", "Platelet"])      # only these labelled
+```
+
+`callout_below` sets the size (share of cells) under which `"auto"` uses a callout. Auto-annotation workflow:
+
+```python
+ps.tl.auto_annotate(adata)                # writes obs['cell_type']
+ps.pl.umap(adata, color='cell_type', on_data=True)
+```
+
 | argument | type | default | meaning |
 |---|---|---|---|
 | `adata` | AnnData | required | The analysis (what `ps.read_h5ad` returns); steps add their results to it in place. |
@@ -1182,6 +1440,8 @@ ps.pl.violin(adata: AnnData, keys: list[str], groupby: str | None = None, ax: An
 
 Soft violins with median dots; calm palette; rich text attributes.
 
+With `split_by` (for example `"condition"`) each group's violin is split by that column: two conditions as the left and right halves of one violin, more as violins side by side, so a gene's change between conditions reads within each cell type.
+
 | argument | type | default | meaning |
 |---|---|---|---|
 | `adata` | AnnData | required | The analysis (what `ps.read_h5ad` returns); steps add their results to it in place. |
@@ -1199,6 +1459,8 @@ ps.pl.volcano(result: Any, group: str | None = None, *, condition: str | None = 
 ```
 
 Fold change against significance for one cell type's comparison.
+
+`result` is the table `ps.tl.compare_conditions` returns, or the data it was run on. Genes past both thresholds (`adj_p_value < alpha` and `|log2 fold change| >= min_log2_fold_change`) are coloured, up and down, and the most significant are named.
 
 | argument | type | default | meaning |
 |---|---|---|---|

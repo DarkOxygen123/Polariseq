@@ -12,8 +12,8 @@ authors:
   - given-names: Trayambak
     family-names: Basak
     email: trayambak@iitmandi.ac.in
-version: 0.2.1
-date-released: 2026-10-17
+version: 0.2.2
+date-released: 2026-10-18
 repository-code: "https://github.com/DarkOxygen123/Polariseq"
 url: "https://github.com/DarkOxygen123/Polariseq"
 license-url: "https://github.com/DarkOxygen123/Polariseq/blob/main/LICENSE"
