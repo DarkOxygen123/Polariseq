@@ -1,0 +1,2 @@
+# GitHub's language bar counts bytes; the notebook's embedded plot images would outweigh the Rust and Python code
+*.ipynb linguist-documentation

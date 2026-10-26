@@ -1,0 +1,23 @@
+{
+ "size": "4062k",
+ "resolution": 1.0,
+ "n_cells": 4000604,
+ "n_clusters": 43,
+ "n_published_types": 77,
+ "ari": 0.428,
+ "nmi": 0.799,
+ "nmi_organ": 0.558,
+ "cells_in_cluster_of_own_type": 0.9278,
+ "types_recovered": 20,
+ "types_recovered_allowing_splits": 23,
+ "rare_types": 19,
+ "rare_types_recovered": 0,
+ "rare_types_recovered_allowing_splits": 0,
+ "marker_overlap_mean": 6.23,
+ "marker_overlap_other_types_mean": 0.35,
+ "clusters_with_marker_overlap": 40,
+ "clusters_scored": 43,
+ "recovery_rule": "one cluster holds >= 50% of the type and is >= 50% that type",
+ "recovery_rule_splits": "the clusters this type dominates together hold >= 50% of it and are >= 50% that type",
+ "published_markers": "S8, q<0.05, protein-coding, fold change >= 2.0, top 20 by expression"
+}

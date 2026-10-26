@@ -1,0 +1,11 @@
+# Environment r of the atlas runs (BPCells), as on the compute node:
+#   micromamba create -p $B/envs/r -c conda-forge r-base=4.4.3 r-igraph=2.3.4 r-matrix=1.7_6 r-jsonlite=2.0.0 \
+#       r-data.table=1.18.6.1 r-remotes=2.5.0 cxx-compiler hdf5
+#   $B/envs/r/bin/Rscript -e 'remotes::install_github("bnprks/BPCells/r@v0.3.1")   # commit 841559ad'
+# run_tool.sh puts $B/envs/r/lib first on LD_LIBRARY_PATH (Scarf's hnswlib and R need its newer libstdc++).
+R 4.4.3
+BPCells 0.3.1
+igraph 2.3.4
+Matrix 1.7.6
+jsonlite 2.0.0
+data.table 1.18.6.1

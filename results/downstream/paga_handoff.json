@@ -1,0 +1,361 @@
+{
+ "n_cells": 4000604,
+ "n_clusters": 43,
+ "seconds": {
+  "polariseq_pipeline": 632.1,
+  "to_anndata": 5.4,
+  "scanpy_paga": 81.4
+ },
+ "peak_footprint_gb_after": {
+  "polariseq_pipeline": 5.8,
+  "to_anndata": 5.8,
+  "scanpy_paga": 14.66
+ },
+ "memory_measure": "peak resident memory (Linux getrusage), compute node",
+ "groups": [
+  {
+   "cluster": "0",
+   "cells": 356175,
+   "type": "Excitatory neurons",
+   "type_share": 0.995,
+   "organ": "Cerebrum",
+   "organ_share": 0.997
+  },
+  {
+   "cluster": "1",
+   "cells": 336794,
+   "type": "Excitatory neurons",
+   "type_share": 0.994,
+   "organ": "Cerebrum",
+   "organ_share": 0.999
+  },
+  {
+   "cluster": "2",
+   "cells": 296907,
+   "type": "Excitatory neurons",
+   "type_share": 0.995,
+   "organ": "Cerebrum",
+   "organ_share": 0.998
+  },
+  {
+   "cluster": "3",
+   "cells": 293020,
+   "type": "Purkinje neurons",
+   "type_share": 0.947,
+   "organ": "Cerebellum",
+   "organ_share": 0.948
+  },
+  {
+   "cluster": "4",
+   "cells": 213660,
+   "type": "Astrocytes",
+   "type_share": 0.995,
+   "organ": "Cerebellum",
+   "organ_share": 0.944
+  },
+  {
+   "cluster": "5",
+   "cells": 194894,
+   "type": "Granule neurons",
+   "type_share": 0.945,
+   "organ": "Cerebellum",
+   "organ_share": 0.956
+  },
+  {
+   "cluster": "6",
+   "cells": 150011,
+   "type": "Adrenocortical cells",
+   "type_share": 0.999,
+   "organ": "Adrenal",
+   "organ_share": 1.0
+  },
+  {
+   "cluster": "7",
+   "cells": 149144,
+   "type": "Excitatory neurons",
+   "type_share": 0.984,
+   "organ": "Cerebrum",
+   "organ_share": 0.992
+  },
+  {
+   "cluster": "8",
+   "cells": 135724,
+   "type": "Inhibitory neurons",
+   "type_share": 0.816,
+   "organ": "Cerebrum",
+   "organ_share": 0.841
+  },
+  {
+   "cluster": "9",
+   "cells": 129587,
+   "type": "Inhibitory interneurons",
+   "type_share": 0.949,
+   "organ": "Cerebellum",
+   "organ_share": 0.955
+  },
+  {
+   "cluster": "10",
+   "cells": 122731,
+   "type": "Stromal cells",
+   "type_share": 0.435,
+   "organ": "Kidney",
+   "organ_share": 0.368
+  },
+  {
+   "cluster": "11",
+   "cells": 112817,
+   "type": "Excitatory neurons",
+   "type_share": 0.956,
+   "organ": "Cerebrum",
+   "organ_share": 0.962
+  },
+  {
+   "cluster": "12",
+   "cells": 104199,
+   "type": "Bronchiolar and alveolar epithelial cells",
+   "type_share": 0.96,
+   "organ": "Lung",
+   "organ_share": 0.993
+  },
+  {
+   "cluster": "13",
+   "cells": 102034,
+   "type": "Astrocytes",
+   "type_share": 0.995,
+   "organ": "Cerebellum",
+   "organ_share": 0.644
+  },
+  {
+   "cluster": "14",
+   "cells": 99750,
+   "type": "Adrenocortical cells",
+   "type_share": 0.997,
+   "organ": "Adrenal",
+   "organ_share": 0.999
+  },
+  {
+   "cluster": "15",
+   "cells": 97285,
+   "type": "Metanephric cells",
+   "type_share": 0.924,
+   "organ": "Kidney",
+   "organ_share": 0.989
+  },
+  {
+   "cluster": "16",
+   "cells": 96059,
+   "type": "Inhibitory neurons",
+   "type_share": 0.977,
+   "organ": "Cerebrum",
+   "organ_share": 0.99
+  },
+  {
+   "cluster": "17",
+   "cells": 92063,
+   "type": "Inhibitory neurons",
+   "type_share": 0.988,
+   "organ": "Cerebrum",
+   "organ_share": 0.996
+  },
+  {
+   "cluster": "18",
+   "cells": 84714,
+   "type": "Stromal cells",
+   "type_share": 0.996,
+   "organ": "Lung",
+   "organ_share": 0.987
+  },
+  {
+   "cluster": "19",
+   "cells": 76965,
+   "type": "Vascular endothelial cells",
+   "type_share": 0.746,
+   "organ": "Lung",
+   "organ_share": 0.239
+  },
+  {
+   "cluster": "20",
+   "cells": 68545,
+   "type": "Granule neurons",
+   "type_share": 0.946,
+   "organ": "Cerebellum",
+   "organ_share": 0.952
+  },
+  {
+   "cluster": "21",
+   "cells": 65384,
+   "type": "Adrenocortical cells",
+   "type_share": 0.993,
+   "organ": "Adrenal",
+   "organ_share": 1.0
+  },
+  {
+   "cluster": "22",
+   "cells": 65045,
+   "type": "Cardiomyocytes",
+   "type_share": 0.994,
+   "organ": "Heart",
+   "organ_share": 0.999
+  },
+  {
+   "cluster": "23",
+   "cells": 59535,
+   "type": "Granule neurons",
+   "type_share": 0.925,
+   "organ": "Cerebellum",
+   "organ_share": 0.931
+  },
+  {
+   "cluster": "24",
+   "cells": 59333,
+   "type": "Unipolar brush cells",
+   "type_share": 0.83,
+   "organ": "Cerebellum",
+   "organ_share": 0.937
+  },
+  {
+   "cluster": "25",
+   "cells": 55959,
+   "type": "Myeloid cells",
+   "type_share": 0.319,
+   "organ": "Thymus",
+   "organ_share": 0.148
+  },
+  {
+   "cluster": "26",
+   "cells": 48353,
+   "type": "Hepatoblasts",
+   "type_share": 0.984,
+   "organ": "Liver",
+   "organ_share": 0.986
+  },
+  {
+   "cluster": "27",
+   "cells": 47472,
+   "type": "Intestinal epithelial cells",
+   "type_share": 0.513,
+   "organ": "Intestine",
+   "organ_share": 0.526
+  },
+  {
+   "cluster": "28",
+   "cells": 44946,
+   "type": "Limbic system neurons",
+   "type_share": 0.988,
+   "organ": "Cerebrum",
+   "organ_share": 0.998
+  },
+  {
+   "cluster": "29",
+   "cells": 43305,
+   "type": "Erythroblasts",
+   "type_share": 0.969,
+   "organ": "Liver",
+   "organ_share": 0.921
+  },
+  {
+   "cluster": "30",
+   "cells": 33543,
+   "type": "Oligodendrocytes",
+   "type_share": 0.986,
+   "organ": "Cerebrum",
+   "organ_share": 0.525
+  },
+  {
+   "cluster": "31",
+   "cells": 30451,
+   "type": "Retinal progenitors and Muller glia",
+   "type_share": 0.465,
+   "organ": "Eye",
+   "organ_share": 0.964
+  },
+  {
+   "cluster": "32",
+   "cells": 26527,
+   "type": "Chromaffin cells",
+   "type_share": 0.762,
+   "organ": "Adrenal",
+   "organ_share": 0.903
+  },
+  {
+   "cluster": "33",
+   "cells": 20676,
+   "type": "Inhibitory neurons",
+   "type_share": 0.996,
+   "organ": "Cerebrum",
+   "organ_share": 0.999
+  },
+  {
+   "cluster": "34",
+   "cells": 18612,
+   "type": "SLC24A4_PEX5L positive cells",
+   "type_share": 0.958,
+   "organ": "Cerebellum",
+   "organ_share": 0.959
+  },
+  {
+   "cluster": "35",
+   "cells": 16505,
+   "type": "Syncytiotrophoblasts and villous cytotrophoblasts",
+   "type_share": 0.851,
+   "organ": "Placenta",
+   "organ_share": 0.992
+  },
+  {
+   "cluster": "36",
+   "cells": 13818,
+   "type": "Vascular endothelial cells",
+   "type_share": 0.999,
+   "organ": "Cerebrum",
+   "organ_share": 0.533
+  },
+  {
+   "cluster": "37",
+   "cells": 12328,
+   "type": "Skeletal muscle cells",
+   "type_share": 0.978,
+   "organ": "Muscle",
+   "organ_share": 0.99
+  },
+  {
+   "cluster": "38",
+   "cells": 10688,
+   "type": "Acinar cells",
+   "type_share": 0.998,
+   "organ": "Pancreas",
+   "organ_share": 1.0
+  },
+  {
+   "cluster": "39",
+   "cells": 8860,
+   "type": "Stromal cells",
+   "type_share": 0.916,
+   "organ": "Placenta",
+   "organ_share": 0.993
+  },
+  {
+   "cluster": "40",
+   "cells": 4368,
+   "type": "Excitatory neurons",
+   "type_share": 0.629,
+   "organ": "Cerebrum",
+   "organ_share": 0.999
+  },
+  {
+   "cluster": "41",
+   "cells": 1554,
+   "type": "Excitatory neurons",
+   "type_share": 0.981,
+   "organ": "Cerebrum",
+   "organ_share": 0.988
+  },
+  {
+   "cluster": "42",
+   "cells": 264,
+   "type": "Purkinje neurons",
+   "type_share": 0.962,
+   "organ": "Cerebellum",
+   "organ_share": 1.0
+  }
+ ]
+}

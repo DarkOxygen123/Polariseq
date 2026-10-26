@@ -1,0 +1,132 @@
+[build-system]
+# pip fetches these for the build: maturin (which also installs Rust when it is missing, from 1.13 on
+# Windows too) and CMake, which builds the bundled HDF5. A C compiler is the one tool to have installed.
+requires = ["maturin>=1.13,<2.0", "cmake>=3.16"]
+build-backend = "maturin"
+
+[project]
+name = "polariseq"
+version = "0.2.2"
+description = "Fast, memory-aware single-cell RNA-seq analysis, in memory or out of core, from a laptop to atlas scale"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "PolyForm-Noncommercial-1.0.0 with additional terms (see LICENSE)" }
+authors = [
+    { name = "Uthamkumar M", email = "uthamkumar.work@gmail.com" },
+    { name = "Abhi Dutta" },
+    { name = "Trayambak Basak", email = "trayambak@iitmandi.ac.in" },
+]
+keywords = ["single-cell", "scRNA-seq", "bioinformatics", "out-of-core", "atlas", "clustering", "UMAP"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Rust",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+# The analysis itself needs NumPy and pandas only. Everything else is an extra, by purpose.
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/DarkOxygen123/Polariseq"
+Documentation = "https://github.com/DarkOxygen123/Polariseq#readme"
+Source = "https://github.com/DarkOxygen123/Polariseq"
+Issues = "https://github.com/DarkOxygen123/Polariseq/issues"
+Changelog = "https://github.com/DarkOxygen123/Polariseq/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+# Figures: ps.pl (UMAP, dot plots, violins, heatmaps, volcano plots, overview figures).
+plot = [
+    "matplotlib>=3.7",
+]
+# Results as SciPy sparse matrices (the neighbour graph in adata.obsp, .to_scipy(), adata.sample()),
+# to hand them to other tools.
+scipy = [
+    "scipy>=1.10",
+]
+# adata.to_anndata() and .h5ad export, for Scanpy and the tools built on AnnData.
+anndata = [
+    "anndata>=0.10",
+    "scipy>=1.10",
+]
+annotation = [  # the earlier name of `anndata`
+    "anndata>=0.10",
+    "scipy>=1.10",
+]
+# The marker databases tl.auto_annotate fetches on request: the Cell Marker Accordion (.rda)
+# and CellMarker and ScType (.xlsx).
+markers = [
+    "pyreadr>=0.5",
+    "openpyxl>=3.1",
+]
+# CellTypist cell-type annotation.
+celltypist = [
+    "celltypist>=1.0",
+    "anndata>=0.10",
+    "scipy>=1.10",
+]
+# Every extra above. Listed out, not as polariseq[...]: `maturin develop --extras all` passes the
+# list to pip, which would look for a polariseq release elsewhere.
+all = [
+    "matplotlib>=3.7",
+    "anndata>=0.10",
+    "scipy>=1.10",
+    "celltypist>=1.0",
+    "pyreadr>=0.5",
+    "openpyxl>=3.1",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.6",
+    "maturin>=1.13,<2.0",
+    "matplotlib>=3.7",
+    "scipy>=1.10",
+    "scanpy>=1.10",
+    "anndata>=0.10",
+]
+
+[tool.maturin]
+# The Rust cdylib crate is `polariseq-python` (lib name `_polariseq`). The
+# pure-Python package lives in `python/`.
+python-source = "python"
+module-name = "polariseq._polariseq"
+features = ["pyo3/extension-module"]
+manifest-path = "crates/polariseq-python/Cargo.toml"
+# The source package is built from the Rust crates and the Python folder; these root files are not part of
+# either, so list them. The metadata names LICENSE, and the upload is refused when the file is missing.
+include = [
+    { path = "LICENSE", format = "sdist" },
+    { path = "THIRD_PARTY_NOTICES.md", format = "sdist" },
+    { path = "CITATION.cff", format = "sdist" },
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# Over-length lines in the package are allowed for now. Every other rule is enforced here, including the ones that catch real
+# defects: `zip()` without `strict=` silently truncates when two sequences
+# disagree in length, which in this codebase means quietly dropping cells.
+"python/polariseq/*" = ["E501"]
+"python/polariseq/tests/*" = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["python/polariseq/tests", "tests"]
+python_files = ["test_*.py"]
+addopts = "-ra -q"

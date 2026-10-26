@@ -1,0 +1,7 @@
+# Cargo build configuration.
+#
+# NOTE: Do NOT add `target-cpu=native` here — it bakes the build host's CPU
+# features into the binary, causing SIGILL crashes on other machines.
+#
+# For local benchmarking only, use:
+#   RUSTFLAGS="-C target-cpu=native" cargo build --release

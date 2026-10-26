@@ -1,0 +1,252 @@
+{
+ "doublets": {
+  "seconds_memory": 5.155301499995403,
+  "seconds_out_of_core": 5.604320832993835,
+  "memory_equals_out_of_core": true,
+  "auroc": 0.8690186794912438,
+  "auroc_by_capture": {
+   "control": 0.8709766369553497,
+   "IFN-beta": 0.8671581433623541
+  },
+  "called": 1912,
+  "genotype_doublets": 3169,
+  "genotype_doublets_called": 1283,
+  "batches": {
+   "control": {
+    "n_cells": 14619.0,
+    "n_genes": 1345.0,
+    "n_sim": 29238.0,
+    "n_neighbors": 180.0,
+    "threshold": 0.16695695316309087,
+    "detected_doublet_rate": 0.07387646213831316,
+    "detectable_doublet_fraction": 0.5020863260140912,
+    "overall_doublet_rate": 0.14713896457765668
+   },
+   "IFN-beta": {
+    "n_cells": 14446.0,
+    "n_genes": 1224.0,
+    "n_sim": 28892.0,
+    "n_neighbors": 180.0,
+    "threshold": 0.1846433206472459,
+    "detected_doublet_rate": 0.05759379759102866,
+    "detectable_doublet_fraction": 0.4333033365637547,
+    "overall_doublet_rate": 0.13291796469366562
+   }
+  }
+ },
+ "analysis": {
+  "cells": 24031,
+  "seconds_analysis": 4.288195542059839,
+  "seconds_compare": 0.2030994170345366,
+  "memory_equals_out_of_core_types": true,
+  "memory_equals_out_of_core_table": true,
+  "cell_type_agreement_with_authors": 0.8612625358911407,
+  "groups": [
+   {
+    "group": "CD4 T cells",
+    "samples": 16,
+    "paired": true,
+    "df_residual": 7.0,
+    "df_prior": 12.332190868264995,
+    "note": NaN
+   },
+   {
+    "group": "NK cells",
+    "samples": 16,
+    "paired": true,
+    "df_residual": 7.0,
+    "df_prior": 8.754967529012168,
+    "note": NaN
+   },
+   {
+    "group": "B cells",
+    "samples": 16,
+    "paired": true,
+    "df_residual": 7.0,
+    "df_prior": 7.829801486284494,
+    "note": NaN
+   },
+   {
+    "group": "CD14+ Monocytes",
+    "samples": 16,
+    "paired": true,
+    "df_residual": 7.0,
+    "df_prior": 6.660473276189779,
+    "note": NaN
+   },
+   {
+    "group": "FCGR3A+ Monocytes",
+    "samples": 16,
+    "paired": true,
+    "df_residual": 7.0,
+    "df_prior": 8.649464666204821,
+    "note": NaN
+   },
+   {
+    "group": "Dendritic cells",
+    "samples": 16,
+    "paired": true,
+    "df_residual": 7.0,
+    "df_prior": 5.6544603271088825,
+    "note": NaN
+   },
+   {
+    "group": "Megakaryocytes",
+    "samples": 0,
+    "paired": false,
+    "df_residual": NaN,
+    "df_prior": NaN,
+    "note": "no sample of the reference condition"
+   }
+  ]
+ },
+ "significant_genes": {
+  "replicates": {
+   "CD4 T cells": 1195,
+   "NK cells": 517,
+   "B cells": 524,
+   "CD14+ Monocytes": 2336,
+   "FCGR3A+ Monocytes": 833,
+   "Dendritic cells": 701
+  },
+  "cells": {
+   "CD4 T cells": 2328,
+   "NK cells": 1130,
+   "B cells": 1286,
+   "CD14+ Monocytes": 5207,
+   "FCGR3A+ Monocytes": 1971,
+   "Dendritic cells": 1638
+  }
+ },
+ "joint_vs_separate": {
+  "same_cell_type": 0.8570654213401159,
+  "log2fc_r": {
+   "B cells": 0.9985330157960798,
+   "CD14+ Monocytes": 0.9991605693634034,
+   "CD4 T cells": 0.9389472752427006,
+   "Dendritic cells": 0.9849900373418853,
+   "FCGR3A+ Monocytes": 0.9996594768136449,
+   "NK cells": 0.9700628896055544
+  }
+ },
+ "isg_up_in_types": {
+  "ISG15": [
+   "B cells",
+   "CD14+ Monocytes",
+   "CD4 T cells",
+   "Dendritic cells",
+   "FCGR3A+ Monocytes",
+   "NK cells"
+  ],
+  "IFI6": [
+   "B cells",
+   "CD14+ Monocytes",
+   "CD4 T cells",
+   "Dendritic cells",
+   "FCGR3A+ Monocytes",
+   "NK cells"
+  ],
+  "IFIT1": [
+   "B cells",
+   "CD14+ Monocytes",
+   "CD4 T cells",
+   "Dendritic cells",
+   "FCGR3A+ Monocytes",
+   "NK cells"
+  ],
+  "IFIT2": [
+   "B cells",
+   "CD14+ Monocytes",
+   "CD4 T cells",
+   "Dendritic cells",
+   "FCGR3A+ Monocytes",
+   "NK cells"
+  ],
+  "IFIT3": [
+   "B cells",
+   "CD14+ Monocytes",
+   "CD4 T cells",
+   "Dendritic cells",
+   "FCGR3A+ Monocytes",
+   "NK cells"
+  ],
+  "MX1": [
+   "B cells",
+   "CD14+ Monocytes",
+   "CD4 T cells",
+   "Dendritic cells",
+   "FCGR3A+ Monocytes",
+   "NK cells"
+  ],
+  "ISG20": [
+   "B cells",
+   "CD14+ Monocytes",
+   "CD4 T cells",
+   "Dendritic cells",
+   "FCGR3A+ Monocytes",
+   "NK cells"
+  ],
+  "LY6E": [
+   "B cells",
+   "CD14+ Monocytes",
+   "CD4 T cells",
+   "Dendritic cells",
+   "FCGR3A+ Monocytes",
+   "NK cells"
+  ],
+  "IFITM3": [
+   "B cells",
+   "CD14+ Monocytes",
+   "CD4 T cells",
+   "Dendritic cells",
+   "FCGR3A+ Monocytes",
+   "NK cells"
+  ],
+  "OAS1": [
+   "B cells",
+   "CD14+ Monocytes",
+   "CD4 T cells",
+   "Dendritic cells",
+   "FCGR3A+ Monocytes",
+   "NK cells"
+  ],
+  "RSAD2": [
+   "B cells",
+   "CD14+ Monocytes",
+   "CD4 T cells",
+   "Dendritic cells",
+   "FCGR3A+ Monocytes",
+   "NK cells"
+  ],
+  "IFI44L": [
+   "B cells",
+   "CD14+ Monocytes",
+   "CD4 T cells",
+   "Dendritic cells",
+   "FCGR3A+ Monocytes",
+   "NK cells"
+  ]
+ },
+ "isg_up_in_every_type": [
+  "ISG15",
+  "IFI6",
+  "IFIT1",
+  "IFIT2",
+  "IFIT3",
+  "MX1",
+  "ISG20",
+  "LY6E",
+  "IFITM3",
+  "OAS1",
+  "RSAD2",
+  "IFI44L"
+ ],
+ "cxcl10_log2fc": {
+  "CD4 T cells": 6.493109965390648,
+  "NK cells": 4.260938169212469,
+  "B cells": 7.407641860877952,
+  "CD14+ Monocytes": 9.382296439837805,
+  "FCGR3A+ Monocytes": 5.072405520900695,
+  "Dendritic cells": 9.217224928630948
+ }
+}

@@ -1,0 +1,38 @@
+{
+ "fetal_matched": {
+  "polariseq_seed0": {
+   "knn_preservation": 0.0405,
+   "type_purity": 0.9249,
+   "centroid_spearman": 0.3369,
+   "n_groups": 77,
+   "seconds": 53.5
+  },
+  "polariseq_seed1": {
+   "knn_preservation": 0.0389,
+   "type_purity": 0.9166,
+   "centroid_spearman": 0.2972,
+   "n_groups": 77,
+   "seconds": 53.3
+  },
+  "umap_learn_seed0": {
+   "knn_preservation": 0.0444,
+   "type_purity": 0.9204,
+   "centroid_spearman": 0.2716,
+   "n_groups": 77,
+   "seconds": 682.6
+  },
+  "umap_learn_seed1": {
+   "knn_preservation": 0.0445,
+   "type_purity": 0.9229,
+   "centroid_spearman": 0.2662,
+   "n_groups": 77,
+   "seconds": 656.8
+  },
+  "published": {
+   "knn_preservation": 0.0306,
+   "type_purity": 0.8291,
+   "centroid_spearman": 0.2231,
+   "n_groups": 77
+  }
+ }
+}

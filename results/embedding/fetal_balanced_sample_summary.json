@@ -1,0 +1,21 @@
+{
+ "procedure": "Cao et al. 2020, Methods, 'Clustering analysis of cells across organs'",
+ "cells": 377456,
+ "groups": 172,
+ "per_group": 5000,
+ "marker_genes": 5010,
+ "marker_rule": "S8 cell-type-specific genes, q = 0",
+ "normalization": "size factor to geometric-mean library size, log1p, genes scaled",
+ "n_pcs": 50,
+ "n_neighbors": 50,
+ "metric": "cosine",
+ "min_dist": null,
+ "seed": 0,
+ "timing_s": {
+  "read": 110.5,
+  "pca": 18.6,
+  "neighbors": 38.4,
+  "umap": 66.1,
+  "total": 292.6
+ }
+}

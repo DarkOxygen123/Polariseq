@@ -1,0 +1,128 @@
+run_id,dataset,tool,threads,step,t_begin_s,t_end_s,wall_s
+brain1306k__scanpy-default__rep1__20261003T171426,brain1306k,Scanpy as shipped,4,import,0.004,40.2043,40.2003
+brain1306k__scanpy-default__rep1__20261003T171426,brain1306k,Scanpy as shipped,4,load,40.2043,55.9934,15.7891
+brain1306k__scanpy-default__rep1__20261003T171426,brain1306k,Scanpy as shipped,4,qc,55.9934,55.9942,0.0008
+brain1306k__scanpy-tuned-int64__rep1__20261003T171918,brain1306k,Scanpy (64-bit indices),4,import,0.0056,14.8871,14.8815
+brain1306k__scanpy-tuned-int64__rep1__20261003T171918,brain1306k,Scanpy (64-bit indices),4,warmup,14.8871,106.6495,91.7623
+brain1306k__scanpy-tuned-int64__rep1__20261003T171918,brain1306k,Scanpy (64-bit indices),4,load,106.6495,129.4928,22.8433
+brain1306k__scanpy-tuned-int64__rep1__20261003T171918,brain1306k,Scanpy (64-bit indices),4,qc,129.4928,185.7368,56.244
+brain1306k__scanpy-tuned-int64__rep1__20261003T171918,brain1306k,Scanpy (64-bit indices),4,filter_cells,185.7368,288.821,103.0842
+brain1306k__scanpy-tuned-int64__rep1__20261003T171918,brain1306k,Scanpy (64-bit indices),4,normalize,288.821,302.9691,14.1481
+brain1306k__scanpy-tuned-int64__rep1__20261003T171918,brain1306k,Scanpy (64-bit indices),4,log1p,302.9691,306.6179,3.6488
+brain1306k__scanpy-tuned-int64__rep1__20261003T171918,brain1306k,Scanpy (64-bit indices),4,hvg,306.6179,399.9507,93.3328
+brain1306k__scanpy-tuned-int64__rep1__20261003T171918,brain1306k,Scanpy (64-bit indices),4,pca,399.9508,504.7575,104.8067
+brain1306k__scanpy-tuned-int64__rep1__20261003T171918,brain1306k,Scanpy (64-bit indices),4,neighbors,504.7576,603.3041,98.5465
+brain1306k__scanpy-tuned-int64__rep1__20261003T171918,brain1306k,Scanpy (64-bit indices),4,leiden,603.3041,720.3062,117.0021
+brain1306k__scanpy-tuned-int64__rep1__20261003T171918,brain1306k,Scanpy (64-bit indices),4,umap,720.3062,4348.7653,3628.4591
+brain1306k__scanpy-tuned__rep1__20261003T171426,brain1306k,Scanpy tuned (32-bit indices),4,import,0.0245,38.231,38.2065
+brain1306k__scanpy-tuned__rep1__20261003T171426,brain1306k,Scanpy tuned (32-bit indices),4,warmup,38.231,189.3218,151.0908
+brain1306k__scanpy-tuned__rep1__20261003T171426,brain1306k,Scanpy tuned (32-bit indices),4,load,189.3218,224.0623,34.7405
+brain1306k__scanpy-tuned__rep1__20261003T171426,brain1306k,Scanpy tuned (32-bit indices),4,qc,224.0623,224.0624,0.0001
+brain1306k__scarf__rep1__20261004T150332,brain1306k,Scarf,4,import,436.2127,437.6723,1.4596
+brain1306k__scarf__rep1__20261004T150332,brain1306k,Scarf,4,warmup,437.6729,480.8361,43.1632
+brain1306k__scarf__rep1__20261004T150332,brain1306k,Scarf,4,load,480.8362,689.7404,208.9042
+brain1306k__scarf__rep1__20261004T150332,brain1306k,Scarf,4,qc,689.7405,689.7405,0.0
+brain1306k__scarf__rep1__20261004T150332,brain1306k,Scarf,4,filter_cells,689.7405,689.8135,0.073
+brain1306k__scarf__rep1__20261004T150332,brain1306k,Scarf,4,normalize,689.8136,689.8136,0.0
+brain1306k__scarf__rep1__20261004T150332,brain1306k,Scarf,4,log1p,689.8136,689.8136,0.0
+brain1306k__scarf__rep1__20261004T150332,brain1306k,Scarf,4,hvg,689.8136,993.2881,303.4745
+brain1306k__scarf__rep1__20261004T150332,brain1306k,Scarf,4,pca,993.2882,3073.7267,2080.4385
+brain1306k__scarf__rep1__20261004T150332,brain1306k,Scarf,4,neighbors,3073.7267,3073.7267,0.0
+brain1306k__scarf__rep1__20261004T150332,brain1306k,Scarf,4,leiden,3073.7267,3200.5334,126.8067
+brain1306k__scarf__rep1__20261004T150332,brain1306k,Scarf,4,umap,3200.5336,4062.2338,861.7002
+fetal4062k__scanpy-default__rep1__20261003T171626,fetal4062k,Scanpy as shipped,4,import,0.0039,37.2061,37.2022
+fetal4062k__scanpy-default__rep1__20261003T171626,fetal4062k,Scanpy as shipped,4,load,37.2061,143.0419,105.8358
+fetal4062k__scanpy-default__rep1__20261003T171626,fetal4062k,Scanpy as shipped,4,qc,143.0419,143.0518,0.0099
+fetal4062k__scanpy-tuned-int64__rep1__20261003T171901,fetal4062k,Scanpy (64-bit indices),4,import,0.0249,37.3236,37.2987
+fetal4062k__scanpy-tuned-int64__rep1__20261003T171901,fetal4062k,Scanpy (64-bit indices),4,warmup,37.3236,196.4887,159.1651
+fetal4062k__scanpy-tuned-int64__rep1__20261003T171901,fetal4062k,Scanpy (64-bit indices),4,load,196.4887,354.93,158.4413
+fetal4062k__scanpy-tuned-int64__rep1__20261003T171901,fetal4062k,Scanpy (64-bit indices),4,qc,354.93,396.6344,41.7044
+fetal4062k__scanpy-tuned-int64__rep1__20261003T171901,fetal4062k,Scanpy (64-bit indices),4,filter_cells,396.6344,540.9946,144.3602
+fetal4062k__scanpy-tuned-int64__rep1__20261003T171901,fetal4062k,Scanpy (64-bit indices),4,normalize,540.9946,560.9992,20.0045
+fetal4062k__scanpy-tuned-int64__rep1__20261003T171901,fetal4062k,Scanpy (64-bit indices),4,log1p,560.9992,566.0424,5.0433
+fetal4062k__scanpy-tuned-int64__rep1__20261003T171901,fetal4062k,Scanpy (64-bit indices),4,hvg,566.0424,724.2803,158.2378
+fetal4062k__scanpy-tuned-int64__rep1__20261003T171901,fetal4062k,Scanpy (64-bit indices),4,pca,724.2803,808.5196,84.2393
+fetal4062k__scanpy-tuned-int64__rep1__20261003T171901,fetal4062k,Scanpy (64-bit indices),4,neighbors,808.5196,1471.9357,663.4161
+fetal4062k__scanpy-tuned-int64__rep1__20261003T171901,fetal4062k,Scanpy (64-bit indices),4,leiden,1471.9357,1934.5854,462.6497
+fetal4062k__scanpy-tuned-int64__rep1__20261003T171901,fetal4062k,Scanpy (64-bit indices),4,umap,1934.5854,14894.8725,12960.2871
+fetal4062k__scanpy-tuned-int64__rep1__20261004T130538,fetal4062k,Scanpy (64-bit indices),4,import,0.0038,41.2878,41.284
+fetal4062k__scanpy-tuned-int64__rep1__20261004T130538,fetal4062k,Scanpy (64-bit indices),4,warmup,41.2879,126.393,85.1051
+fetal4062k__scanpy-tuned-int64__rep1__20261004T130538,fetal4062k,Scanpy (64-bit indices),4,load,126.393,233.5947,107.2017
+fetal4062k__scanpy-tuned-int64__rep1__20261004T130538,fetal4062k,Scanpy (64-bit indices),4,qc,233.5948,257.9204,24.3256
+fetal4062k__scanpy-tuned-int64__rep1__20261004T130538,fetal4062k,Scanpy (64-bit indices),4,filter_cells,257.9204,332.2421,74.3217
+fetal4062k__scanpy-tuned-int64__rep1__20261004T130538,fetal4062k,Scanpy (64-bit indices),4,normalize,332.2421,343.1384,10.8963
+fetal4062k__scanpy-tuned-int64__rep1__20261004T130538,fetal4062k,Scanpy (64-bit indices),4,log1p,343.1384,346.1562,3.0178
+fetal4062k__scanpy-tuned-int64__rep1__20261004T130538,fetal4062k,Scanpy (64-bit indices),4,hvg,346.1562,416.706,70.5498
+fetal4062k__scanpy-tuned-int64__rep1__20261004T130538,fetal4062k,Scanpy (64-bit indices),4,pca,416.706,462.7562,46.0502
+fetal4062k__scanpy-tuned-int64__rep1__20261004T130538,fetal4062k,Scanpy (64-bit indices),4,neighbors,462.7562,766.4185,303.6623
+fetal4062k__scanpy-tuned-int64__rep1__20261004T130538,fetal4062k,Scanpy (64-bit indices),4,leiden,766.4185,1018.8961,252.4776
+fetal4062k__scanpy-tuned-int64__rep1__20261004T130538,fetal4062k,Scanpy (64-bit indices),4,umap,1018.8961,6863.001,5844.1049
+fetal4062k__scarf__rep1__20261004T125231,fetal4062k,Scarf,4,import,1144.0594,1145.9198,1.8604
+fetal4062k__scarf__rep1__20261004T125231,fetal4062k,Scarf,4,warmup,1145.9203,1193.5186,47.5983
+fetal4062k__scarf__rep1__20261004T125231,fetal4062k,Scarf,4,load,1193.5187,3322.2588,2128.7401
+fetal4062k__scarf__rep1__20261004T125231,fetal4062k,Scarf,4,qc,3322.2597,3322.2597,0.0
+fetal4062k__scarf__rep1__20261004T125231,fetal4062k,Scarf,4,filter_cells,3322.2597,3322.566,0.3063
+fetal4062k__scarf__rep1__20261004T125231,fetal4062k,Scarf,4,normalize,3322.566,3322.566,0.0
+fetal4062k__scarf__rep1__20261004T125231,fetal4062k,Scarf,4,log1p,3322.566,3322.566,0.0
+fetal4062k__scarf__rep1__20261004T125231,fetal4062k,Scarf,4,hvg,3322.5661,5886.0808,2563.5147
+fetal4062k__scarf__rep1__20261004T125231,fetal4062k,Scarf,4,pca,5886.0809,13154.1167,7268.0358
+fetal4062k__scarf__rep1__20261004T125231,fetal4062k,Scarf,4,neighbors,13154.1168,13154.1168,0.0
+fetal4062k__scarf__rep1__20261004T125231,fetal4062k,Scarf,4,leiden,13154.1168,13634.7116,480.5948
+fetal4062k__scarf__rep1__20261004T125231,fetal4062k,Scarf,4,umap,13634.7117,16821.2801,3186.5684
+brain1306k__scarf__rep1__20261003T174102,brain1306k,Scarf,4,import,455.4397,456.925,1.4853
+brain1306k__scarf__rep1__20261003T174102,brain1306k,Scarf,4,warmup,456.9254,495.7929,38.8675
+brain1306k__scarf__rep1__20261003T174102,brain1306k,Scarf,4,load,495.793,826.5505,330.7575
+brain1306k__scarf__rep1__20261003T174102,brain1306k,Scarf,4,qc,826.5508,826.5508,0.0
+brain1306k__scarf__rep1__20261003T174102,brain1306k,Scarf,4,filter_cells,826.5508,826.6374,0.0866
+brain1306k__scarf__rep1__20261003T174102,brain1306k,Scarf,4,normalize,826.6374,826.6374,0.0
+brain1306k__scarf__rep1__20261003T174102,brain1306k,Scarf,4,log1p,826.6374,826.6374,0.0
+brain1306k__scarf__rep1__20261003T174102,brain1306k,Scarf,4,hvg,826.6374,1249.6835,423.0461
+brain1306k__scarf__rep1__20261003T174102,brain1306k,Scarf,4,pca,1249.6836,3129.4654,1879.7818
+brain1306k__scarf__rep1__20261003T174102,brain1306k,Scarf,4,neighbors,3129.466,3129.466,0.0
+brain1306k__scarf__rep1__20261003T174102,brain1306k,Scarf,4,leiden,3129.466,3264.2321,134.7661
+brain1306k__scarf__rep1__20261003T174102,brain1306k,Scarf,4,umap,3264.2322,3264.2322,0.0
+brain1306k__polariseq-ram__rep1__20261005T083305,brain1306k,Polariseq in-memory,4,import,0.0036,9.269,9.2654
+brain1306k__polariseq-ram__rep1__20261005T083305,brain1306k,Polariseq in-memory,4,load,9.2763,29.3705,20.0942
+brain1306k__polariseq-ram__rep1__20261005T083305,brain1306k,Polariseq in-memory,4,qc,29.3705,31.5391,2.1685
+brain1306k__polariseq-ram__rep1__20261005T083305,brain1306k,Polariseq in-memory,4,filter_cells,31.5391,34.7059,3.1668
+brain1306k__polariseq-ram__rep1__20261005T083305,brain1306k,Polariseq in-memory,4,normalize,34.7059,36.101,1.3951
+brain1306k__polariseq-ram__rep1__20261005T083305,brain1306k,Polariseq in-memory,4,log1p,36.101,44.7641,8.663
+brain1306k__polariseq-ram__rep1__20261005T083305,brain1306k,Polariseq in-memory,4,hvg,44.7641,62.4217,17.6576
+brain1306k__polariseq-ram__rep1__20261005T083305,brain1306k,Polariseq in-memory,4,renormalize,62.4218,66.6373,4.2155
+brain1306k__polariseq-ram__rep1__20261005T083305,brain1306k,Polariseq in-memory,4,pca,66.6373,153.6683,87.031
+brain1306k__polariseq-ram__rep1__20261005T083305,brain1306k,Polariseq in-memory,4,neighbors,153.6683,203.3175,49.6491
+brain1306k__polariseq-ram__rep1__20261005T083305,brain1306k,Polariseq in-memory,4,leiden,203.3175,228.5769,25.2594
+brain1306k__polariseq-ram__rep1__20261005T083305,brain1306k,Polariseq in-memory,4,umap,228.5769,319.5268,90.9499
+brain1306k__polariseq-spill__rep1__20261005T083328,brain1306k,Polariseq out-of-core,4,import,0.0035,2.6621,2.6586
+brain1306k__polariseq-spill__rep1__20261005T083328,brain1306k,Polariseq out-of-core,4,preprocess,3.3291,400.2427,396.9136
+brain1306k__polariseq-spill__rep1__20261005T083328,brain1306k,Polariseq out-of-core,4,umap,400.2427,509.7813,109.5386
+fetal4062k__polariseq-ram__rep1__20261005T083353,fetal4062k,Polariseq in-memory,4,import,0.0037,4.6903,4.6866
+fetal4062k__polariseq-ram__rep1__20261005T083353,fetal4062k,Polariseq in-memory,4,load,4.7306,103.5708,98.8402
+fetal4062k__polariseq-ram__rep1__20261005T083353,fetal4062k,Polariseq in-memory,4,qc,103.5708,107.357,3.7862
+fetal4062k__polariseq-ram__rep1__20261005T083353,fetal4062k,Polariseq in-memory,4,filter_cells,107.357,111.2905,3.9335
+fetal4062k__polariseq-ram__rep1__20261005T083353,fetal4062k,Polariseq in-memory,4,normalize,111.2905,112.6233,1.3327
+fetal4062k__polariseq-ram__rep1__20261005T083353,fetal4062k,Polariseq in-memory,4,log1p,112.6233,120.7622,8.1389
+fetal4062k__polariseq-ram__rep1__20261005T083353,fetal4062k,Polariseq in-memory,4,hvg,120.7622,139.2109,18.4487
+fetal4062k__polariseq-ram__rep1__20261005T083353,fetal4062k,Polariseq in-memory,4,renormalize,139.2109,142.2832,3.0723
+fetal4062k__polariseq-ram__rep1__20261005T083353,fetal4062k,Polariseq in-memory,4,pca,142.2832,168.8573,26.5741
+fetal4062k__polariseq-ram__rep1__20261005T083353,fetal4062k,Polariseq in-memory,4,neighbors,168.8574,368.7337,199.8763
+fetal4062k__polariseq-ram__rep1__20261005T083353,fetal4062k,Polariseq in-memory,4,leiden,368.7337,460.3734,91.6397
+fetal4062k__polariseq-ram__rep1__20261005T083353,fetal4062k,Polariseq in-memory,4,umap,460.3734,839.6085,379.2351
+fetal4062k__polariseq-ram__rep1__20261005T083529,fetal4062k,Polariseq in-memory,8,import,0.0047,7.8876,7.8828
+fetal4062k__polariseq-ram__rep1__20261005T083529,fetal4062k,Polariseq in-memory,8,load,7.9216,107.4725,99.5509
+fetal4062k__polariseq-ram__rep1__20261005T083529,fetal4062k,Polariseq in-memory,8,qc,107.4725,110.0693,2.5968
+fetal4062k__polariseq-ram__rep1__20261005T083529,fetal4062k,Polariseq in-memory,8,filter_cells,110.0693,114.8083,4.739
+fetal4062k__polariseq-ram__rep1__20261005T083529,fetal4062k,Polariseq in-memory,8,normalize,114.8083,115.5992,0.7909
+fetal4062k__polariseq-ram__rep1__20261005T083529,fetal4062k,Polariseq in-memory,8,log1p,115.5992,119.6883,4.0891
+fetal4062k__polariseq-ram__rep1__20261005T083529,fetal4062k,Polariseq in-memory,8,hvg,119.6884,129.7177,10.0293
+fetal4062k__polariseq-ram__rep1__20261005T083529,fetal4062k,Polariseq in-memory,8,renormalize,129.7177,131.2769,1.5592
+fetal4062k__polariseq-ram__rep1__20261005T083529,fetal4062k,Polariseq in-memory,8,pca,131.2769,150.3061,19.0292
+fetal4062k__polariseq-ram__rep1__20261005T083529,fetal4062k,Polariseq in-memory,8,neighbors,150.3062,299.0764,148.7702
+fetal4062k__polariseq-ram__rep1__20261005T083529,fetal4062k,Polariseq in-memory,8,leiden,299.0765,375.6855,76.609
+fetal4062k__polariseq-ram__rep1__20261005T083529,fetal4062k,Polariseq in-memory,8,umap,375.6855,566.1621,190.4766
+fetal4062k__polariseq-spill__rep1__20261005T083504,fetal4062k,Polariseq out-of-core,4,import,0.0046,8.5532,8.5485
+fetal4062k__polariseq-spill__rep1__20261005T083504,fetal4062k,Polariseq out-of-core,4,preprocess,10.8787,639.5167,628.638
+fetal4062k__polariseq-spill__rep1__20261005T083504,fetal4062k,Polariseq out-of-core,4,umap,639.5167,984.1467,344.63
+fetal4062k__polariseq-spill__rep1__20261005T083602,fetal4062k,Polariseq out-of-core,8,import,0.0051,6.5497,6.5446
+fetal4062k__polariseq-spill__rep1__20261005T083602,fetal4062k,Polariseq out-of-core,8,preprocess,9.1408,517.0602,507.9194
+fetal4062k__polariseq-spill__rep1__20261005T083602,fetal4062k,Polariseq out-of-core,8,umap,517.0603,709.0535,191.9932

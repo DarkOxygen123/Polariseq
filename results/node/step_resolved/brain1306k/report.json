@@ -1,0 +1,164 @@
+{
+ "dataset": {
+  "files": [
+   "<run folder>/bench/benchmarks/results/validation_data/brain1306k.h5ad"
+  ],
+  "cells_in_file": 1306127,
+  "genes": 27998,
+  "stored_values": 2624828308,
+  "cells_after_qc": 1292537,
+  "genes_after_qc": 22787,
+  "genes_for_pca": 2000,
+  "clusters": 37
+ },
+ "settings": {
+  "ram_gb": 100.0,
+  "threads": 4,
+  "mode": "out-of-core",
+  "min_genes": 200,
+  "min_cells": 3,
+  "n_hvg": 2000,
+  "workflow": "polariseq",
+  "hvg_flavor": "seurat_floor",
+  "renormalize": true,
+  "umap_init": "multilevel",
+  "umap_min_dist": 0.5,
+  "umap_epochs": 100,
+  "n_pcs": 50,
+  "neighbors": 15,
+  "resolution": 1.0,
+  "seed": 0,
+  "umap": true,
+  "keep_obs": "",
+  "color_by": "",
+  "no_export": true,
+  "not_counts": false
+ },
+ "mode": "out-of-core",
+ "budget": {
+  "ram_gb": 100.0,
+  "threads": 4
+ },
+ "plan": {
+  "ram": {
+   "fits": true,
+   "peak_gb": 23.259088128,
+   "limiting_step": "hvg subset",
+   "cells_per_block": 32768
+  },
+  "spill": {
+   "fits": true,
+   "peak_gb": 8.682008448,
+   "limiting_step": "hvg",
+   "cells_per_block": 32768
+  }
+ },
+ "seconds_total": 662.9873862098902,
+ "peak_memory_gb": {
+  "held_sampled": 8.180862976,
+  "held_os": 8.180862976,
+  "lowest_free": 173.222793216
+ },
+ "disk_gb": {
+  "project": 4.668128187,
+  "written_during_run": 7.79525734402705,
+  "by_part": {
+   "scratch": 0.0,
+   "runs/brain1306k/matrix": 4.007372155,
+   "runs/brain1306k/latents": 0.0,
+   "runs/brain1306k/results": 0.660756032
+  }
+ },
+ "steps": [
+  {
+   "step": "open",
+   "start_s": 0.0010218359529972076,
+   "seconds": 0.5637338664382696,
+   "peak_rss_gb": 0.279187456
+  },
+  {
+   "step": "qc (and the one-time copy of the counts)",
+   "start_s": 0.5648621171712875,
+   "seconds": 158.03441152721643,
+   "peak_rss_gb": 1.868619776
+  },
+  {
+   "step": "normalize",
+   "start_s": 158.5994962565601,
+   "seconds": 26.478294868022203,
+   "peak_rss_gb": 0.657297408
+  },
+  {
+   "step": "hvg",
+   "start_s": 185.07813128829002,
+   "seconds": 46.59305991977453,
+   "peak_rss_gb": 8.180862976
+  },
+  {
+   "step": "renormalize",
+   "start_s": 231.689759850502,
+   "seconds": 72.7140705101192,
+   "peak_rss_gb": 1.188339712
+  },
+  {
+   "step": "pca",
+   "start_s": 304.406674368307,
+   "seconds": 190.8849554080516,
+   "peak_rss_gb": 2.66364928
+  },
+  {
+   "step": "neighbors",
+   "start_s": 495.29288185201585,
+   "seconds": 49.82152243703604,
+   "peak_rss_gb": 1.715744768
+  },
+  {
+   "step": "leiden",
+   "start_s": 545.1145403962582,
+   "seconds": 22.26389411278069,
+   "peak_rss_gb": 1.707081728
+  },
+  {
+   "step": "umap",
+   "start_s": 567.3796678800136,
+   "seconds": 89.83922090567648,
+   "peak_rss_gb": 1.86785792
+  },
+  {
+   "step": "figures",
+   "start_s": 657.2192374244332,
+   "seconds": 5.763870557770133,
+   "peak_rss_gb": 1.431068672
+  }
+ ],
+ "machine": {
+  "os": "Linux-3.10.0-1160.el7.x86_64-x86_64-with-glibc2.17",
+  "python": "3.12.14",
+  "cpu": "Intel(R) Xeon(R) Platinum 8268 CPU @ 2.90GHz",
+  "cores_physical": 48,
+  "cores_logical": 48,
+  "memory_gb": 201.5,
+  "scheduler_allocation": {
+   "cpus": "4",
+   "memory_mb": "49152"
+  },
+  "project_disk_free_gb": 698417.0,
+  "project_filesystem": "lustre",
+  "polariseq": {
+   "python_version": "0.1.0b1",
+   "rust_core_version": "0.1.0",
+   "matched": true
+  }
+ },
+ "outputs": [
+  "qc.png",
+  "pca.png",
+  "clusters.png",
+  "umap.png",
+  "figure_data.json",
+  "resources.csv",
+  "resources.png",
+  "report.json",
+  "run_summary.md"
+ ]
+}

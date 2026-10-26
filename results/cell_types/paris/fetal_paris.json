@@ -1,0 +1,74 @@
+{
+ "seconds": 74.3,
+ "peak_footprint_gb": 5.66,
+ "memory_measure": "peak resident memory (Linux getrusage), compute node",
+ "graph_loaded_footprint_gb": 5.66,
+ "n": 4000604,
+ "nnz": 97524788,
+ "cuts": {
+  "straight_80": {
+   "recovered": 26,
+   "of": 77,
+   "n_clusters": 80,
+   "rare_recovered": 0,
+   "rare_of": 18,
+   "cells_under_own_type": 0.9341
+  },
+  "straight_132": {
+   "recovered": 31,
+   "of": 77,
+   "n_clusters": 132,
+   "rare_recovered": 0,
+   "rare_of": 18,
+   "cells_under_own_type": 0.9404
+  },
+  "straight_185": {
+   "recovered": 32,
+   "of": 77,
+   "n_clusters": 185,
+   "rare_recovered": 0,
+   "rare_of": 18,
+   "cells_under_own_type": 0.9418
+  },
+  "straight_223": {
+   "recovered": 34,
+   "of": 77,
+   "n_clusters": 223,
+   "rare_recovered": 0,
+   "rare_of": 18,
+   "cells_under_own_type": 0.9436
+  },
+  "straight_300": {
+   "recovered": 36,
+   "of": 77,
+   "n_clusters": 300,
+   "rare_recovered": 0,
+   "rare_of": 18,
+   "cells_under_own_type": 0.9449
+  },
+  "straight_400": {
+   "recovered": 37,
+   "of": 77,
+   "n_clusters": 400,
+   "rare_recovered": 0,
+   "rare_of": 18,
+   "cells_under_own_type": 0.9474
+  },
+  "balanced_50000_5000": {
+   "recovered": 34,
+   "of": 77,
+   "n_clusters": 184,
+   "rare_recovered": 0,
+   "rare_of": 18,
+   "cells_under_own_type": 0.9437
+  },
+  "balanced_20000_2000": {
+   "recovered": 37,
+   "of": 77,
+   "n_clusters": 397,
+   "rare_recovered": 0,
+   "rare_of": 18,
+   "cells_under_own_type": 0.9461
+  }
+ }
+}
