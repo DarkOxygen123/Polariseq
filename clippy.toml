@@ -1,0 +1,2 @@
+# Names of tools and formats written in doc comments as prose, not as code.
+doc-valid-idents = ["AnnData", "SciPy", "ScType", "CMake", ".."]
