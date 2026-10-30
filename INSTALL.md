@@ -71,16 +71,10 @@ python -c "import polariseq as ps; print(ps.__version__); print(ps.resources())"
 
 ## 2. Extras: add what you need
 
-The install above is the analysis alone: reading `.h5ad` and 10x files, planning, quality control,
-normalization, gene selection, PCA, the neighbor graph, Leiden clustering (multi-level Louvain with
-`method="fast"`), UMAP, Paris, PAGA, marker genes, doublets (Scrublet), integration (Harmony) and comparisons
-between conditions, with NumPy and pandas as its only Python dependencies.
-
-The `anndata` package is not one of them. The analysis object, `ps.AnnData`, is Polariseq's own: it
-uses AnnData's names, and its matrix is held by the Rust core. Reading and writing `.h5ad` files is done
-by the Rust core too, so a file saved with `adata.write_h5ad` opens in Scanpy without any extra here.
-
-Each extra adds one purpose:
+The install above is the analysis alone: reading and writing `.h5ad` files, reading 10x files,
+planning, quality control, normalization, gene selection, PCA, the neighbor graph, Leiden clustering
+(multi-level Louvain with `method="fast"`), UMAP, Paris, PAGA, marker genes, doublets (Scrublet), integration (Harmony) and comparisons
+between conditions, with NumPy and pandas as its only Python dependencies. Each extra adds one purpose:
 
 | extra | installs | needed for |
 |---|---|---|

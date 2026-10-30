@@ -17,8 +17,8 @@ computer and tens of millions on one server node.
 pip install "polariseq[plot] @ git+https://github.com/DarkOxygen123/Polariseq.git"
 ```
 
-Python 3.10 to 3.14 on macOS, Linux or Windows. `[plot]` adds the figures. The core alone needs only
-NumPy and pandas, with no `anndata` package.
+Python 3.10 to 3.14 on macOS, Linux or Windows. `[plot]` adds the figures, and
+[Installation](install.md) lists the other extras.
 
 ## Where to start
 
