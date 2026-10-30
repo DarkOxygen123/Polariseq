@@ -100,6 +100,9 @@ ps.pl.umap(adata, color="leiden", show=False, save="umap.png")
 
 ## Documentation
 
+The documentation website, **https://darkoxygen123.github.io/Polariseq/**, has the guides, the API
+reference and the Rust crates' reference. The same pages are in the repository:
+
 | | |
 |---|---|
 | [Quick start](docs/QUICKSTART.md) | a first analysis, step by step, in ten minutes |

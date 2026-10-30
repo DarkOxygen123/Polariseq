@@ -2,8 +2,7 @@
 
 Every figure comes from `ps.pl` and needs the `plot` extra
 (`pip install "polariseq[plot] @ git+https://github.com/DarkOxygen123/Polariseq.git"`). The figures below
-are shown in the default theme and, when GitHub is in dark mode, in the dark theme
-(`ps.pl.set_theme("dark")`).
+are shown in the default theme, and in dark mode in the dark theme (`ps.pl.set_theme("dark")`).
 
 ## Gene expression on the embedding
 
@@ -46,7 +45,7 @@ ps.pl.dotplot(adata, markers, groupby="cell_type")
 ## Themes
 
 `ps.pl.set_theme(name)` sets the look of every later figure; `with ps.pl.theme(name):` sets it for a
-block of code. Sizes and colours can be overridden, for example
+block of code. Sizes and colors can be overridden, for example
 `ps.pl.set_theme("dark", point_scale=2.0, dpi=200)`.
 
 | theme | for |

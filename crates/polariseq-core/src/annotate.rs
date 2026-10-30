@@ -1,19 +1,20 @@
-//! Marker-based cell type scores, streamed over row blocks.
+//! Marker-based cell type scores, streamed over blocks of rows.
 //!
-//! Each marker gene is standardized over all cells (its mean and standard
-//! deviation from a first pass), and each cell's score for a cell type is the
-//! weighted sum of its standardized marker values, `W` holding positive
-//! weights for a type's markers and negative ones for genes the type should
-//! not express (Sc-Type, Ianevski et al. 2022; Cell Marker Accordion,
-//! Busarello et al. 2025). A zero entry of the sparse matrix is a value too:
-//! its standardized value enters through a per-type offset, so the score is
-//! exact without densifying anything. The weights come from Python
-//! (`python/polariseq/_annotate.py`), following the Cell Marker Accordion's
-//! MIT-licensed code; see `THIRD_PARTY_NOTICES.md`.
+//! Each marker gene is standardized over all cells, with its mean and standard
+//! deviation from a first pass. A cell's score for a cell type is the weighted
+//! sum of its standardized marker values, with positive weights for the type's
+//! markers and negative ones for genes the type should not express (ScType,
+//! Ianevski et al. 2022, and the Cell Marker Accordion, Busarello et al. 2025).
 //!
-//! Memory stays at the per-cluster sums and three numbers per cell (the best
-//! type, its score, and the runner-up's score): no cells-by-types matrix is
-//! held, so an atlas is scored within the budget of one block.
+//! A zero in the sparse matrix is a value too. Its standardized value enters
+//! through an offset for each type, so the score is exact without making the
+//! matrix dense. The weights come from Python (`python/polariseq/_annotate.py`),
+//! following the Cell Marker Accordion's MIT-licensed code (see
+//! `THIRD_PARTY_NOTICES.md`).
+//!
+//! Memory stays at the per-cluster sums and three numbers per cell: the best
+//! type, its score and the runner-up's score. No cells-by-types matrix is held,
+//! so an atlas is scored within the memory of one block.
 
 use crate::rowblocks::{BlockFold, RowBlocks};
 
@@ -47,14 +48,14 @@ pub struct MarkerScores {
 
 /// Score every cell for every cell type.
 ///
-/// `cols[k]` is the matrix column of marker gene `k`; `weights` is
-/// `k x n_types`, row-major. `labels[i]` is cell `i`'s cluster; a label
-/// `>= n_groups` leaves the cell out of the cluster sums (its own scores are
-/// still returned).
+/// `cols[k]` is the matrix column of marker gene `k`, and `weights` is
+/// `k × n_types`, row-major. `labels[i]` is cell `i`'s cluster. A label of
+/// `n_groups` or more leaves the cell out of the cluster sums, and its own
+/// scores are still returned.
 ///
 /// # Panics
-/// Panics if `weights.len() != cols.len() * n_types` or there are fewer
-/// labels than rows.
+/// Panics if `weights.len() != cols.len() * n_types` or there are fewer labels
+/// than rows.
 #[must_use]
 pub fn marker_scores(
     src: &dyn RowBlocks,

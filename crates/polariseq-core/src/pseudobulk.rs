@@ -1,34 +1,42 @@
 //! Comparing conditions: pseudobulk sums and limma-trend.
 //!
 //! A difference between conditions is a difference between biological
-//! replicates, not between cells: cells of one donor are not independent
-//! observations, and tests that treat them so overstate significance. The
-//! standard remedy is the pseudobulk: sum each replicate's counts within a
-//! cell type, then test the sums as bulk RNA-seq samples. This module does
-//! both steps.
+//! replicates. Cells of one donor are not independent observations, and tests
+//! that treat them as independent overstate the significance. The standard
+//! remedy is the pseudobulk: add up each replicate's counts within a cell type,
+//! then test the sums as bulk RNA-seq samples. This module does both steps.
 //!
-//! [`unit_sums_blocks`] streams the raw counts once and sums them per unit
-//! (a replicate, condition and cell type), in any row-block source (the
-//! in-memory matrix, the on-disk store).
+//! [`unit_sums_blocks`] reads the raw counts once and sums them per unit (a
+//! replicate, condition and cell type), from any source of row blocks: the
+//! matrix in memory or the store on disk.
 //!
-//! [`limma_trend`] tests one cell type's sums by the recommended pseudobulk
-//! workflow of edgeR and limma: the expression filter (Chen, Lun & Smyth
-//! 2016), library sizes of the genes kept, TMM normalization (Robinson &
-//! Oshlack 2010), log2 counts per million with a prior count of 3 scaled to
-//! the library size, a linear model per gene, empirical Bayes moderation of
-//! the variances with an intensity trend (Smyth 2004; Phipson et al. 2016;
-//! limma-trend, Law et al. 2014), and Benjamini-Hochberg adjusted p-values.
-//! Replicates measured under several conditions (the same donor before and
-//! after treatment) are paired: the design blocks on them,
-//! `~ replicate + condition`; otherwise it is `~ condition`.
+//! [`limma_trend`] tests one cell type's sums by the pseudobulk workflow edgeR
+//! and limma recommend:
 //!
-//! The methods are implemented from those papers and from the edgeR and
-//! limma documentation. Where the documentation leaves a detail open (the
-//! trimming ranks of TMM, the knots of the trend, the treatment of zero
-//! variances, the order of operations at the filter's cutoff), it was fixed
-//! by comparing outputs with edgeR 4.10.5 and limma 3.68.5 on generated data
-//! (`benchmarks/relicence/pseudobulk_reference.R` on the reproduce branch): on 350 datasets the genes
-//! kept are the same and the p-values agree to 4e-12.
+//! 1. the expression filter (Chen, Lun and Smyth 2016),
+//! 2. library sizes over the genes kept, and TMM normalization (Robinson and
+//!    Oshlack 2010),
+//! 3. log2 counts per million, with a prior count of 3 scaled to the library
+//!    size,
+//! 4. a linear model for each gene,
+//! 5. empirical Bayes moderation of the variances with an intensity trend
+//!    (Smyth 2004, Phipson et al. 2016, limma-trend as in Law et al. 2014),
+//! 6. Benjamini-Hochberg adjusted p-values.
+//!
+//! Replicates measured under several conditions, such as one donor before and
+//! after treatment, are paired: the design blocks on them,
+//! `~ replicate + condition`. Otherwise the design is `~ condition`.
+//!
+//! # Agreement with edgeR and limma
+//!
+//! The methods are implemented from the papers and from the edgeR and limma
+//! documentation. Where the documentation leaves a detail open (the trimming
+//! ranks of TMM, the knots of the trend, the treatment of zero variances, the
+//! order of operations at the filter's cutoff), it was fixed by comparing
+//! outputs with edgeR 4.10.5 and limma 3.68.5 on generated data, with
+//! `benchmarks/relicence/pseudobulk_reference.R` on the `reproduce` branch. On
+//! 350 datasets the genes kept are the same and the p-values agree to within
+//! 4e-12.
 
 // Formula-style names (n, g, p, x, y, v, z) follow the references; exact
 // float comparisons (ties, zeros) are deliberate.

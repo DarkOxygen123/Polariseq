@@ -1,39 +1,48 @@
-//! Doublet detection: Scrublet (Wolock, Lopez & Klein, *Cell Systems* 8,
+//! Doublet detection with Scrublet (Wolock, Lopez and Klein, *Cell Systems* 8,
 //! 281-291, 2019), ported from its reference implementation,
-//! <https://github.com/swolock/scrublet>, MIT License, Copyright (c) 2018
-//! Samuel Wolock.
+//! <https://github.com/swolock/scrublet> (MIT License, Copyright (c) 2018
+//! Samuel Wolock).
 //!
-//! Each batch (one capture, such as a 10x channel: doublets form within one)
-//! is scored on its own, as the reference scores one sample:
+//! Doublets form within one capture, such as one 10x channel, so each batch is
+//! scored on its own, as the reference scores one sample:
 //!
-//! 1. Cells are scaled to the batch's mean total count, and genes are kept
-//!    when their variability exceeds what counting noise explains (the
-//!    v-score of Klein et al. 2015, top 15% by default) and they reach 3
-//!    normalized counts in at least 3 cells.
-//! 2. Doublets are simulated by adding the counts of random pairs of cells,
-//!    twice as many as there are cells.
+//! 1. Cells are scaled to the batch's mean total count. Genes are kept when
+//!    their variability exceeds what counting noise explains (the v-score of
+//!    Klein et al. 2015, the top 15% by default) and they reach 3 normalized
+//!    counts in at least 3 cells.
+//! 2. Doublets are simulated by adding up the counts of random pairs of cells,
+//!    twice as many doublets as there are cells.
 //! 3. Cells and doublets are scaled to 10^6 counts, standardized with the
 //!    cells' gene means and deviations, and projected on the cells' first 30
 //!    principal components.
 //! 4. Each cell's score is the Bayesian estimate, from the share of simulated
-//!    doublets among its `k` nearest neighbours, of the probability that it
-//!    is a doublet. The threshold is the minimum between the two modes of the
+//!    doublets among its `k` nearest neighbors, of the probability that it is a
+//!    doublet. The threshold is the minimum between the two modes of the
 //!    simulated doublets' scores.
 //!
-//! Two departures from the reference, neither changing what is computed:
+//! # Differences from the reference
 //!
-//! - **Simulated doublets are never built.** After the per-cell scaling of
-//!   step 3 every operation is linear, so a doublet's coordinates are its two
-//!   parents' projections summed and rescaled:
-//!   `z(a + b) = 10^6 (u_a + u_b) / (t_a + t_b) − m`, where `u` is a cell's
-//!   raw counts over the genes' deviations projected on the components. The
-//!   memory is `30` numbers per cell, not a second count matrix twice the
-//!   size of the first.
-//! - **Neighbours are exact** (the reference uses annoy's approximate
-//!   search); NN-descent only above [`ScrubletOptions::exact_knn_max`]
-//!   points, if a limit is set.
+//! Two differences, neither of which changes what is computed:
 //!
-//! The reference's licence, which covers the parts of this module that follow
+//! - **Simulated doublets are never built.** After the scaling of step 3 every
+//!   operation is linear, so a doublet's coordinates are its two parents'
+//!   projections, summed and rescaled:
+//!
+//!   ```text
+//!   z(a + b) = 10^6 · (u_a + u_b) / (t_a + t_b) − m
+//!   ```
+//!
+//!   where `u` is a cell's raw counts divided by the genes' deviations and
+//!   projected on the components, `t` its total count and `m` the projected
+//!   means. This takes 30 numbers per cell, against a second count matrix
+//!   twice the size of the first.
+//! - **Neighbors are exact.** The reference uses Annoy's approximate search.
+//!   NN-Descent is used only above [`ScrubletOptions::exact_knn_max`] points,
+//!   when a limit is set.
+//!
+//! # Licenses
+//!
+//! The reference's license, which covers the parts of this module that follow
 //! its code:
 //!
 //! > The MIT License (MIT). Copyright (c) 2018 Samuel Wolock.
@@ -54,27 +63,28 @@
 //! > OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 //! > USE OR OTHER DEALINGS IN THE SOFTWARE.
 //!
-//! The numerical helpers below reproduce, to match the reference, NumPy's
-//! `percentile`, `linspace`, `histogram` and `round` (BSD-3-Clause, Copyright
-//! (c) 2005-2025 NumPy Developers), SciPy's `optimize.fmin` (BSD-3-Clause,
-//! Copyright (c) 2001-2002 Enthought, Inc. and 2003 onwards SciPy Developers)
-//! and scikit-image's `filters.threshold_minimum` (in
+//! The numerical helpers of this module reproduce, to match the reference,
+//! NumPy's `percentile`, `linspace`, `histogram` and `round` (BSD-3-Clause,
+//! Copyright (c) 2005-2025 NumPy Developers), SciPy's `optimize.fmin`
+//! (BSD-3-Clause, Copyright (c) 2001-2002 Enthought, Inc. and 2003 onwards SciPy
+//! Developers) and scikit-image's `filters.threshold_minimum` (in
 //! `skimage/filters/thresholding.py`, BSD-2-Clause, Copyright 2009-2015 Board
 //! of Regents of the University of Wisconsin-Madison, Broad Institute of MIT
 //! and Harvard, and Max Planck Institute of Molecular Cell Biology and
 //! Genetics, 2009 Zachary Pincus, 2009 Almar Klein, and 2009-2022 the
-//! scikit-image team). Their licences permit redistribution in source and
+//! scikit-image team). Their licenses permit redistribution in source and
 //! binary form provided the copyright notice, their conditions and disclaimer
 //! are retained, which `THIRD_PARTY_NOTICES.md` does.
 //!
-//! The counts are read in three streamed passes (totals, gene statistics,
-//! and the selected genes of each batch), so the source may be the in-memory
-//! matrix or the on-disk store alike; only the selected genes of the batches
-//! being scored are held, in groups bounded by
-//! [`ScrubletOptions::max_batch_bytes`].
+//! # Implementation notes
+//!
+//! The counts are read in three streamed passes (totals, gene statistics, and
+//! the selected genes of each batch), so the source may be the in-memory matrix
+//! or the store on disk. Only the selected genes of the batches being scored are
+//! held in memory, in groups bounded by [`ScrubletOptions::max_batch_bytes`].
 
 // Numerical code written after its references: single letters follow the
-// formulas (n cells, h genes, p components, k neighbours, w scale factors,
+// formulas (n cells, h genes, p components, k neighbors, w scale factors,
 // u projections, m means), loops index several arrays at once, the exact
 // float comparisons are the reference's, and project names (NumPy, SciPy)
 // appear in prose.
@@ -104,7 +114,7 @@ pub const UNSCORED: u32 = u32::MAX;
 /// Rows per streamed block.
 const BLOCK: usize = 8_192;
 
-/// Options for [`scrublet_blocks`]; the defaults are Scanpy's for
+/// Options for [`scrublet_blocks`]. The defaults are Scanpy's for
 /// `pp.scrublet`, which follow the reference except for the expected rate.
 #[derive(Debug, Clone)]
 pub struct ScrubletOptions {
@@ -114,7 +124,7 @@ pub struct ScrubletOptions {
     pub expected_doublet_rate: f64,
     /// Uncertainty of the expected share.
     pub stdev_doublet_rate: f64,
-    /// Neighbours per cell (`None`: `round(0.5 √n)`), before scaling by the
+    /// Neighbors per cell (`None`: `round(0.5 √n)`), before scaling by the
     /// share of simulated points.
     pub n_neighbors: Option<usize>,
     /// Principal components.
@@ -129,12 +139,12 @@ pub struct ScrubletOptions {
     pub threshold: Option<f64>,
     /// Random seed of the simulation (batch `b` uses `seed + b`).
     pub seed: u64,
-    /// Points (cells and simulated doublets) up to which the neighbour
-    /// search is exact; above it, NN-descent. The default has no limit:
-    /// Scrublet's neighbour count grows as the square root of the batch, so
-    /// NN-descent's work grows with the square of the batch like the exact
-    /// search's, and it was slower at every batch size measured (94,000 and
-    /// 1.2 million points).
+    /// The number of points (cells and simulated doublets) up to which the neighbor
+    /// search is exact, with NN-Descent above it. The default sets no limit:
+    /// Scrublet's neighbor count grows as the square root of the batch, so
+    /// NN-Descent's work grows with the square of the batch, like the exact
+    /// search's, and it was slower at every batch size measured (94,000 and 1.2
+    /// million points).
     pub exact_knn_max: usize,
     /// Bytes the batches' selected genes may occupy at once.
     pub max_batch_bytes: usize,
@@ -170,10 +180,10 @@ pub struct BatchResult {
     pub n_genes: usize,
     /// Doublets simulated.
     pub n_sim: usize,
-    /// Neighbours per point, after scaling.
+    /// Neighbors per point, after scaling.
     pub n_neighbors: usize,
-    /// The threshold used (`None` when it could not be found; no cell is
-    /// then called a doublet).
+    /// The threshold used, or `None` when none could be found, in which case no
+    /// cell is called a doublet.
     pub threshold: Option<f64>,
     /// Scores of the simulated doublets.
     pub scores_sim: Vec<f32>,
@@ -528,14 +538,14 @@ struct Part {
     vals: Vec<f32>,
 }
 
-/// Order of candidate neighbours: by distance, then by index. (A comparator,
+/// Order of candidate neighbors: by distance, then by index. (A comparator,
 /// so it takes references.)
 #[allow(clippy::trivially_copy_pass_by_ref)]
 fn by_distance(a: &(f32, u32), b: &(f32, u32)) -> std::cmp::Ordering {
     a.0.total_cmp(&b.0).then(a.1.cmp(&b.1))
 }
 
-/// Exact `k` nearest neighbours of every point, itself excluded, ties broken
+/// Exact `k` nearest neighbors of every point, itself excluded, ties broken
 /// by index: `n × k` indices. Tiles of 128 queries run in parallel; each walks
 /// the points in blocks of 2,048, takes the block's squared distances
 /// `|q|² + |p|² − 2 p·q` from one matrix product (1 MB, so it stays in cache).
@@ -789,7 +799,7 @@ fn dot(a: &[f64], b: &[f64]) -> f64 {
 ///
 /// The reference computes these components with ARPACK; the dense route
 /// computes every eigenvector of the `h × h` Gram matrix. All three give the
-/// same subspace to rounding, and the neighbours that follow depend only on
+/// same subspace to rounding, and the neighbors that follow depend only on
 /// the subspace (not on the components' signs).
 fn top_components_lanczos(
     counts: &CsrMatrix,
@@ -801,7 +811,7 @@ fn top_components_lanczos(
 ) -> Option<(Vec<f64>, usize)> {
     let z = Standardized::new(counts, w, sd);
     let (n, h) = (z.n, z.h);
-    // The centred matrix has rank at most min(n - 1, h).
+    // The centerd matrix has rank at most min(n - 1, h).
     let rank = (n - 1).min(h);
     let max_steps = rank.min((10 * p).max(300));
     let mut basis: Vec<f64> = Vec::with_capacity(max_steps * h);
@@ -1407,7 +1417,7 @@ mod tests {
     }
 
     /// The simulated doublets of Kang et al.'s control capture (29,238 of
-    /// them, as counts per neighbour count, k = 180): the reference's rule
+    /// them, as counts per neighbor count, k = 180): the reference's rule
     /// splits off the two highest scores at 0.68, leaving 0.003% above it;
     /// the peeled rule finds the valley the reference Scrublet found on its
     /// own simulation of the same data (0.16).

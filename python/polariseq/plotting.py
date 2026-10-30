@@ -317,12 +317,13 @@ def _c(key: str) -> Any:
 
 
 def set_theme(name: str = "paper", **overrides: Any) -> None:
-    """Set the global theme, optionally overriding individual keys.
+    """Set the look of every later figure.
 
-    Presets: ``paper`` (default, dense and small for figures), ``notebook``,
-    ``talk`` (large type for slides), ``dark``, ``print``, and ``classic``
-    (the look of Polariseq 0.2.0, kept so figures made with it draw the same).
-    Larger type comes with larger figures, so nothing collides.
+    Themes: ``paper`` (the default, journal figure sizes), ``notebook``
+    (larger text for screens), ``talk`` (slides), ``dark`` (dark
+    backgrounds), ``print`` (black text, heavier lines, 600 dpi) and
+    ``classic`` (the earlier default look, so older figures draw the same).
+    Larger text comes with larger figures, so labels do not collide.
 
     Any theme key may be overridden::
 
@@ -334,6 +335,14 @@ def set_theme(name: str = "paper", **overrides: Any) -> None:
     Args:
         name: ``'paper'``, ``'notebook'``, ``'talk'``, ``'dark'``, ``'print'`` or ``'classic'``.
         **overrides: Theme keys to change (``point_scale``, ``dpi``, ...).
+
+    Examples:
+        ```python
+        ps.pl.set_theme("notebook")
+        ```
+
+    See also:
+        ``ps.pl.theme``, ``ps.pl.get_theme``.
     """
     if name not in _PRESETS:
         raise ValueError(f"unknown theme {name!r}; choose from {list(_PRESETS)}")
@@ -347,7 +356,7 @@ def set_theme(name: str = "paper", **overrides: Any) -> None:
 
 
 class theme:
-    """Use a theme for a block, then restore the previous one.
+    """Use a theme for a block of code, then go back to the previous one.
 
     ::
 
@@ -371,19 +380,43 @@ class theme:
 
 
 def get_theme() -> dict:
+    """The active theme's settings: colors, font sizes, resolution, as ``set_theme`` sets them.
+
+    Returns:
+        A copy of the settings; changing it leaves the theme as it is (``set_theme`` changes it).
+
+    See also:
+        ``ps.pl.set_theme``.
+
+    Examples:
+        ```python
+        ps.pl.get_theme()["dpi"]
+        ```
+    """
     return dict(_THEME)
 
 
 def categorical_palette(n: int, washed: bool = True) -> list[str]:
-    """Palette for n classes: washed Tol, or golden-angle HSL beyond 22.
+    """Colors for ``n`` groups, as the plots use them.
+
+    Eight base colors, then the same hues lighter and then darker, for up
+    to 24 groups; beyond that, hues spaced evenly around the color wheel.
+    The ``classic`` theme uses Paul Tol's colors.
 
     Args:
-        n: Number of colours.
-        washed: Soften the colours (the theme's wash) so many groups stay calm; ``False`` gives the
-            full colours.
+        n: Number of colors.
+        washed: Lighten the colors, as the theme does; ``False`` gives the full colors.
 
     Returns:
-        A list of hex colours.
+        A list of hex colors.
+
+    Examples:
+        ```python
+        colors = ps.pl.categorical_palette(12)
+        ```
+
+    See also:
+        ``ps.pl.set_theme``.
     """
     if _c("palette") == "classic":
         base = [_wash(c, _c("wash")) for c in _TOL_RAW] if washed else _TOL_RAW
@@ -1241,9 +1274,9 @@ def embedding(
     adata: AnnData, basis: str = "X_umap", color: str | list[str] | None = None,
     **kw,
 ) -> Any:
-    """Scatter any 2-D embedding in `obsm`.
+    """Draw the cells on any two-dimensional embedding in ``obsm``.
 
-    `umap` and `pca` are thin wrappers over this; use it directly for a basis
+    ``umap`` and ``pca`` draw through it; use it directly for an embedding
     they do not cover (`X_tsne`, a custom projection). The leading `X_` is
     optional: ``basis="umap"`` and ``basis="X_umap"`` both work.
 
@@ -1252,6 +1285,18 @@ def embedding(
         color: An ``obs`` column or a gene; a list draws one panel each.
         **kw: As for :func:`umap` (``size``, ``title``, ``legend_loc``, ``groups``, ``split_by``,
             ``ncols``, ...).
+
+    Returns:
+        The Matplotlib axis; with several ``color`` values or ``split_by``, a list of axes, one per
+        panel.
+
+    Examples:
+        ```python
+        ps.pl.embedding(adata, "X_pca_harmony", color="leiden")
+        ```
+
+    See also:
+        ``ps.pl.umap``, ``ps.pl.pca``.
     """
     if basis not in adata.obsm and f"X_{basis}" in adata.obsm:
         basis = f"X_{basis}"
@@ -1387,7 +1432,7 @@ def umap(
     show: bool = True, save: str | None = None, legend_loc: str | None = "right",
     **kw,
 ) -> Any:
-    """UMAP scatter — calm palette, density-ordered, optional on-data labels.
+    """Draw the cells on their UMAP layout, colored by a column or a gene.
 
     `color` accepts an obs column, a gene name, or a **list of either**, in
     which case a grid of panels is drawn (`ncols=` to control the shape)::
@@ -1414,10 +1459,17 @@ def umap(
         ps.pl.umap(adata, color='cell_type', on_data=True)
 
     Args:
-        color: An ``obs`` column or a gene to colour the cells by (a list draws one panel each);
+        color: An ``obs`` column or a gene to color the cells by (a list draws one panel each);
             ``None`` draws the cells in grey.
         **kw: ``groups=`` (highlight some groups), ``split_by=`` (one panel per level of a column),
             ``labels=`` (name groups on the plot), ``palette=``, ``subtitle=``, ``render=``.
+
+    Returns:
+        The Matplotlib axis; with several ``color`` values or ``split_by``, a list of axes, one per
+        panel.
+
+    See also:
+        ``ps.tl.umap``, ``ps.pl.embedding``.
     """
     split_by = kw.pop("split_by", None)
     if split_by is not None:
@@ -1442,10 +1494,21 @@ def pca(
     show: bool = True, save: str | None = None,
     legend_loc: str | None = "right", **kw,
 ) -> Any:
-    """PCA scatter (PC1 vs PC2). Same extra attributes as :func:`umap`.
+    """Draw the cells on the first two principal components. Takes the same options as ``umap``.
 
     Args:
-        color: An ``obs`` column or a gene to colour the cells by.
+        color: An ``obs`` column or a gene to color the cells by.
+
+    Returns:
+        The Matplotlib axis.
+
+    Examples:
+        ```python
+        ps.pl.pca(adata, color="leiden")
+        ```
+
+    See also:
+        ``ps.pp.pca``, ``ps.pl.pca_variance_ratio``.
     """
     return _embedding(adata, "X_pca", color, ax, size, title, cmap, show,
                       save, legend_loc, **kw)
@@ -1453,10 +1516,21 @@ def pca(
 
 def pca_variance_ratio(adata: AnnData, ax: Any | None = None, show: bool = True,
                        save: str | None = None, n_comps: int = 30, **kw) -> Any:
-    """Variance explained per PC + cumulative curve on one calm axis.
+    """The share of the variance each principal component explains, with the running total.
 
     Args:
         n_comps: Principal components shown.
+
+    Returns:
+        The Matplotlib axis.
+
+    Examples:
+        ```python
+        ps.pl.pca_variance_ratio(adata, n_comps=30)
+        ```
+
+    See also:
+        ``ps.pp.pca``.
     """
     plt = _plt()
     t = _THEME
@@ -1633,7 +1707,7 @@ def violin(
     ax: Any | None = None, show: bool = True, save: str | None = None,
     *, split_by: str | None = None, **kw,
 ) -> Any:
-    """Soft violins with median dots; calm palette; rich text attributes.
+    """Violin plots of genes or ``obs`` columns, per group, with each group's median marked.
 
     With ``split_by`` (for example ``"condition"``) each group's violin is
     split by that column: two conditions as the left and right halves of one
@@ -1645,6 +1719,18 @@ def violin(
         groupby: ``obs`` column of the groups (default: all cells as one).
         split_by: ``obs`` column of two levels (for example the condition), drawn as the two halves
             of each violin.
+
+    Returns:
+        The Matplotlib axis of the first panel; with ``split_by``, an array of axes, one per key.
+
+    Examples:
+        ```python
+        ps.pl.violin(adata, ["n_genes", "n_counts"], groupby="leiden")
+        ps.pl.violin(adata, ["ISG15"], groupby="cell_type", split_by="condition")
+        ```
+
+    See also:
+        ``ps.pl.dotplot``.
     """
     from polariseq import _checks
 
@@ -1825,7 +1911,7 @@ def volcano(result: Any, group: str | None = None, *, condition: str | None = No
 
     ``result`` is the table ``ps.tl.compare_conditions`` returns, or the data
     it was run on. Genes past both thresholds (``adj_p_value < alpha`` and
-    ``|log2 fold change| >= min_log2_fold_change``) are coloured, up and
+    ``|log2 fold change| >= min_log2_fold_change``) are colored, up and
     down, and the most significant are named.
 
     Args:
@@ -1836,6 +1922,19 @@ def volcano(result: Any, group: str | None = None, *, condition: str | None = No
         alpha: Adjusted p-value threshold.
         min_log2_fold_change: Absolute log2 fold change threshold.
         key: Where in ``uns`` the comparison is, when ``result`` is the analysis.
+
+    Returns:
+        The Matplotlib axis.
+
+    Examples:
+        ```python
+        res = ps.tl.compare_conditions(adata, "condition", "control",
+                                       groupby="cell_type", sample_key="donor")
+        ps.pl.volcano(res, "CD14+ Monocytes")
+        ```
+
+    See also:
+        ``ps.tl.compare_conditions``, ``ps.pl.fold_changes``.
     """
     plt = _plt()
     t = _THEME
@@ -1904,6 +2003,17 @@ def fold_changes(result: Any, genes: list[str] | None = None, *, condition: str 
         n_genes: Genes taken from each cell type when ``genes`` is not given.
         alpha: Adjusted p-value below which a change is marked.
         key: Where in ``uns`` the comparison is, when ``result`` is the analysis.
+
+    Returns:
+        The Matplotlib axis.
+
+    Examples:
+        ```python
+        ps.pl.fold_changes(res, n_genes=4)
+        ```
+
+    See also:
+        ``ps.tl.compare_conditions``, ``ps.pl.volcano``.
     """
     plt = _plt()
     t = _THEME
@@ -1982,6 +2092,18 @@ def scrublet_score_distribution(adata: AnnData, *, log: bool = True, show: bool 
 
     Args:
         log: Logarithmic count axis for the cells.
+
+    Returns:
+        A NumPy array of axes, one row per batch: the cells' scores, then the simulated doublets'.
+
+    Examples:
+        ```python
+        ps.pp.scrublet(adata, batch_key="sample")
+        ps.pl.scrublet_score_distribution(adata)
+        ```
+
+    See also:
+        ``ps.pp.scrublet``.
     """
     plt = _plt()
     t = _THEME
@@ -2032,7 +2154,20 @@ def scrublet_score_distribution(adata: AnnData, *, log: bool = True, show: bool 
 
 def highly_variable_genes(adata: AnnData, ax: Any | None = None, show: bool = True,
                           save: str | None = None, **kw) -> Any:
-    """Mean–variance relation with HVGs softly highlighted."""
+    """Each gene's mean expression against its variability, with the selected genes highlighted.
+
+    Returns:
+        The Matplotlib axis.
+
+    Examples:
+        ```python
+        ps.pp.highly_variable_genes(adata, n_top_genes=2000)
+        ps.pl.highly_variable_genes(adata)
+        ```
+
+    See also:
+        ``ps.pp.highly_variable_genes``.
+    """
     import matplotlib.lines as mlines
     plt = _plt()
     t = _THEME
@@ -2084,14 +2219,25 @@ def dotplot(
     ax: Any | None = None, show: bool = True, save: str | None = None,
     **kw,
 ) -> Any:
-    """Dot plot: size = fraction expressing, colour = mean expression.
+    """Genes by group as dots: the size is the share of cells expressing the gene, the color its mean
+    expression.
 
-    Genes may be given as `markers=` or, for scanpy compatibility,
-    `var_names=`.
+    Give the genes as ``markers=`` or, as in Scanpy, ``var_names=``.
 
     Args:
         markers: Genes to show (or ``var_names=``), one column each.
         groupby: ``obs`` column of the groups, one row each.
+
+    Returns:
+        The Matplotlib axis.
+
+    Examples:
+        ```python
+        ps.pl.dotplot(adata, ["CD3D", "CD8A", "MS4A1", "LYZ"], groupby="cell_type")
+        ```
+
+    See also:
+        ``ps.pl.heatmap``, ``ps.get.markers``.
     """
     markers = _resolve_markers(markers, kw, "dotplot")
     import matplotlib.cm as cm
@@ -2184,15 +2330,25 @@ def heatmap(
     ax: Any | None = None, cmap: Any = None, show: bool = True,
     save: str | None = None, **kw,
 ) -> Any:
-    """Heatmap of z-scored marker expression across groups.
+    """Genes by group as a heatmap, each gene's mean expression standardized across the groups.
 
-    Genes may be given as `markers=` or, for scanpy compatibility,
-    `var_names=`.
+    Give the genes as ``markers=`` or, as in Scanpy, ``var_names=``.
 
     Args:
         markers: Genes to show (or ``var_names=``).
         groupby: ``obs`` column of the groups.
-        cmap: Matplotlib colour map (default: the theme's).
+        cmap: Matplotlib color map (default: the theme's).
+
+    Returns:
+        The Matplotlib axis.
+
+    Examples:
+        ```python
+        ps.pl.heatmap(adata, ["CD3D", "CD8A", "MS4A1", "LYZ"], groupby="cell_type")
+        ```
+
+    See also:
+        ``ps.pl.dotplot``.
     """
     markers = _resolve_markers(markers, kw, "heatmap")
     plt = _plt()
@@ -2261,8 +2417,8 @@ def rank_genes_groups(
 
     Reads what `ps.tl.rank_genes_groups` wrote. The y axis is the
     t-statistic, so panel heights are comparable within a group but not
-    necessarily across them — pass ``sharey=True`` if you want them forced
-    onto one scale, at the cost of squashing the weaker clusters.
+    necessarily across them. ``sharey=True`` puts every panel on one scale,
+    which flattens the clusters with weaker markers.
 
     ::
 
@@ -2274,6 +2430,12 @@ def rank_genes_groups(
         n_genes: Genes per cluster.
         sharey: One y scale for every panel.
         key: Where in ``uns`` the ranking is.
+
+    Returns:
+        A list of axes, one per group; the axis given as ``ax``, when one is.
+
+    See also:
+        ``ps.tl.rank_genes_groups``, ``ps.get.markers``.
     """
     plt = _plt()
 
@@ -2349,11 +2511,24 @@ def stacked_bar(
     ax: Any | None = None, show: bool = True, save: str | None = None,
     **kw,
 ) -> Any:
-    """Horizontal 100% composition bars with legend below.
+    """What each group is made of, as horizontal bars that add up to 100%.
+
+    For example, the share of each dataset or condition within each cluster.
 
     Args:
         groupby: ``obs`` column of the bars (for example the clusters).
         color_by: ``obs`` column split within each bar (for example the dataset or condition).
+
+    Returns:
+        The Matplotlib axis.
+
+    Examples:
+        ```python
+        ps.pl.stacked_bar(adata, groupby="leiden", color_by="condition")
+        ```
+
+    See also:
+        ``ps.pl.cluster_sizes``.
     """
     plt = _plt()
     t = _THEME
@@ -2413,7 +2588,20 @@ def stacked_bar(
 
 def scatter_qc(adata: AnnData, ax: Any | None = None, show: bool = True,
                save: str | None = None, **kw) -> Any:
-    """QC scatter: genes vs counts with density rendering at scale."""
+    """Detected genes against total counts for every cell, drawn as density for large datasets.
+
+    Returns:
+        The Matplotlib axis.
+
+    Examples:
+        ```python
+        ps.pp.calculate_qc_metrics(adata)
+        ps.pl.scatter_qc(adata)
+        ```
+
+    See also:
+        ``ps.pl.qc_distributions``, ``ps.pp.filter_cells``.
+    """
     plt = _plt()
     t = _THEME
 
@@ -2502,8 +2690,7 @@ def qc_distributions(adata: AnnData, keys: tuple | list = ("n_genes", "n_counts"
 
     Counts and detected genes span orders of magnitude, so the bins are
     spaced evenly on a log scale (a linear histogram on a log axis collapses
-    the bulk of the cells into a few wide blocks). Nothing is sampled: a
-    histogram of tens of millions of values is one pass. The median is
+    the bulk of the cells into a few wide blocks). The median is
     marked, and so is any filter threshold passed in ``thresholds``
     (``{"n_genes": 200}``).
 
@@ -2519,6 +2706,17 @@ def qc_distributions(adata: AnnData, keys: tuple | list = ("n_genes", "n_counts"
         thresholds: Filter thresholds to mark, ``{'n_genes': 200}``.
         before: The same metrics from before filtering, ``{key: values}``.
         bins: Histogram bins (log-spaced).
+
+    Returns:
+        A list of axes, one per metric in ``keys``.
+
+    Examples:
+        ```python
+        ps.pl.qc_distributions(adata, thresholds={"n_genes": 200})
+        ```
+
+    See also:
+        ``ps.pp.calculate_qc_metrics``, ``ps.pl.scatter_qc``.
     """
     plt = _plt()
     t = _THEME
@@ -2607,6 +2805,17 @@ def cluster_sizes(adata: AnnData, key: str = "leiden", *, log: bool | None = Non
     Args:
         key: ``obs`` column of the clusters.
         log: Logarithmic count axis; ``None`` chooses it when sizes span widely.
+
+    Returns:
+        The Matplotlib axis.
+
+    Examples:
+        ```python
+        ps.pl.cluster_sizes(adata, key="leiden")
+        ```
+
+    See also:
+        ``ps.pl.stacked_bar``.
     """
     plt = _plt()
     from matplotlib.ticker import FuncFormatter
@@ -2648,7 +2857,7 @@ def cluster_sizes(adata: AnnData, key: str = "leiden", *, log: bool | None = Non
 
 def overview_data(adata: AnnData, *, cluster_key: str = "leiden", qc_before: dict | None = None,
                   thresholds: dict | None = None, bins: int = 64) -> dict:
-    """The numbers behind the figures of :func:`overview`, as plain Python values.
+    """The numbers behind the figures of ``overview``, as plain Python values.
 
     ``qc``: for each metric, the bin edges (evenly spaced on a log scale, as drawn), the number of cells
     in each bin before filtering (when ``qc_before`` is given) and among the cells kept, the threshold
@@ -2660,6 +2869,19 @@ def overview_data(adata: AnnData, *, cluster_key: str = "leiden", qc_before: dic
         qc_before: Per-cell metrics from before filtering.
         thresholds: Filter thresholds, ``{'n_genes': 200}``.
         bins: Histogram bins (log-spaced).
+
+    Returns:
+        A dict with ``qc``, ``cluster_sizes``, ``pca_variance_ratio`` and the number of cells in the
+        embedding, as described above.
+
+    See also:
+        ``ps.pl.overview``.
+
+    Examples:
+        ```python
+        data = ps.pl.overview_data(adata)
+        data["cluster_sizes"]
+        ```
     """
     thresholds = thresholds or {}
     data: dict = {"n_cells": int(adata.n_obs), "qc": {}}
@@ -2698,7 +2920,7 @@ def overview(adata: AnnData, out: str, *, cluster_key: str = "leiden",
     """The standard figures of an analysis, written to ``out``, each drawn the
     way that suits the size of the data: quality-control distributions over
     every cell, variance explained by the principal components, cluster sizes,
-    and the UMAP coloured by cluster and by any obs column in ``color_by``
+    and the UMAP colored by cluster and by any obs column in ``color_by``
     (drawn as density above :data:`DENSITY_ABOVE` cells). ``qc_before`` is
     the per-cell metrics from before filtering (see
     :func:`qc_distributions`), so the cells a threshold removed are shown.
@@ -2709,13 +2931,21 @@ def overview(adata: AnnData, out: str, *, cluster_key: str = "leiden",
     Args:
         out: Folder the figures are written to (created if missing).
         cluster_key: ``obs`` column of the clusters.
-        color_by: Further ``obs`` columns to colour the UMAP by, one figure each.
+        color_by: Further ``obs`` columns to color the UMAP by, one figure each.
         thresholds: Filter thresholds to mark, ``{'n_genes': 200}``.
         qc_before: Per-cell metrics from before filtering, to show what was removed.
         prefix: Text put before each file name.
 
     Returns:
         ``{figure: path}`` for each figure written.
+
+    Examples:
+        ```python
+        ps.pl.overview(adata, "figures/", color_by=["dataset"])
+        ```
+
+    See also:
+        ``ps.pl.overview_data``, ``ps.pl.qc_distributions``.
     """
     import os
 
@@ -2774,6 +3004,17 @@ def compare_analyses(analyses: dict, key: str = "leiden", *, basis: str = "X_uma
         analyses: ``{name: analysis}``, as for ``ps.tl.compare_analyses``.
         key: The ``obs`` column of clusters in each.
         basis: The embedding the cells are placed by.
+
+    Returns:
+        A list of axes, one per analysis.
+
+    Examples:
+        ```python
+        ps.pl.compare_analyses(runs)
+        ```
+
+    See also:
+        ``ps.tl.compare_analyses``.
     """
     from polariseq import AnnData, _checks
     from polariseq._analyses import ari

@@ -1,36 +1,47 @@
-//! Randomized SVD (Halko–Martinsson–Tropp) for sparse and dense matrices.
+//! Randomized SVD (Halko, Martinsson and Tropp 2011) for sparse and dense
+//! matrices.
 //!
-//! Computes the top-`k` singular triplets in O(nnz · l) time instead of the
-//! O(n · min(n,m)²) of a full SVD — the right algorithm for PCA when only the
-//! top ~50 components matter.
+//! Computes the top `k` singular values and vectors in time proportional to
+//! `nnz · l`, far less than a full SVD needs. This makes it the method of
+//! choice for PCA, where only the first few dozen components matter.
 //!
-//! Algorithm (with `l = k + oversample`):
-//! 1. `Y = A · Ω`, `Ω` Gaussian `(n_cols × l)`.
-//! 2. Power iterations: `Q = qr(Y)`, `Z = qr(Aᵀ Q)`, `Y = A · Z`.
-//! 3. `Q = qr(Y)`; `Bᵀ = Aᵀ Q` (`n_cols × l`).
-//! 4. Thin SVD of the small `Bᵀ = P S Wᵀ`; then `U = Q · W`, singular values `S`.
+//! # Algorithm
 //!
-//! ## Implicit centering
+//! With `l = k + oversample` and a Gaussian random matrix `Ω` of size
+//! `n_cols × l`:
 //!
-//! PCA needs `A − 1μᵀ` (columns centered) but centering a sparse matrix
-//! densifies it. Instead both products absorb the correction algebraically:
-//! `(A − 1μᵀ) B = A B − 1 (μᵀ B)` and `(A − 1μᵀ)ᵀ Q = Aᵀ Q − μ (1ᵀ Q)`.
-//! Pass the column means as [`RsvdOptions::center`] and the matrix is never
-//! touched.
+//! ```text
+//! 1. Y = A Ω
+//! 2. n_power_iters times:   Q = qr(Y),   Z = qr(Aᵀ Q),   Y = A Z
+//! 3. Q = qr(Y),   Bᵀ = Aᵀ Q                     (Bᵀ is n_cols × l)
+//! 4. Bᵀ = P S Wᵀ  (thin SVD of the small matrix),   U = Q W
+//! ```
 //!
-//! ## Kernels
+//! `U` holds the left singular vectors and `S` the singular values.
 //!
-//! - [`spmm`] (`A · B`) is parallel over **rows**: each row of the CSR is read
-//!   exactly once and produces one dense row of the output. This is the fix
-//!   for the earlier column-parallel version, which streamed the whole matrix
-//!   once per column of `B`.
-//! - [`spmm_t`] (`Aᵀ · Q`) accumulates into per-chunk `n_cols × l` partials
-//!   over a **fixed** row chunking and merges them in chunk order, so the
-//!   result is bit-identical regardless of thread scheduling. Float addition
-//!   is not associative; a fold/reduce would not be reproducible.
+//! # Centering without densifying
 //!
-//! Everything works on borrowed slices ([`CsrRef`]), so memory-mapped
-//! matrices use the same code without a copy.
+//! PCA needs the matrix with its column means `μ` subtracted, `A − 1μᵀ`, but
+//! subtracting them from a sparse matrix would fill in every zero. The two
+//! products of the algorithm absorb the correction instead:
+//!
+//! ```text
+//! (A − 1μᵀ) B  = A B − 1 (μᵀ B)
+//! (A − 1μᵀ)ᵀ Q = Aᵀ Q − μ (1ᵀ Q)
+//! ```
+//!
+//! Pass the column means as [`RsvdOptions::center`], and the matrix itself is
+//! never changed.
+//!
+//! # Implementation notes
+//!
+//! - [`spmm`] (`A · B`) runs in parallel over the rows: each row of the sparse
+//!   matrix is read once and gives one dense row of the result.
+//! - [`spmm_t`] (`Aᵀ · Q`) adds into partial results over a fixed split of the
+//!   rows and combines them in order, so the result has the same bits however
+//!   the threads are scheduled.
+//! - Both work on borrowed slices ([`CsrRef`]), so a matrix read from disk uses
+//!   the same code without a copy.
 
 #![allow(clippy::many_single_char_names, clippy::doc_markdown)]
 
@@ -80,8 +91,8 @@ pub struct RsvdOptions<'a> {
     pub k: usize,
     /// Extra sketch columns beyond `k` (Halko et al. recommend 5–10).
     pub oversample: usize,
-    /// Krylov depth `q` (blocks beyond the sketch); 2–4 typical. Each
-    /// level costs two passes and `l` more basis columns.
+    /// Krylov depth `q`, the blocks beyond the sketch, usually 2 to 4. Each
+    /// level costs two passes over the data and `l` more basis columns.
     pub n_power_iters: usize,
     /// Seed for the Gaussian sketch.
     pub seed: u64,
@@ -204,10 +215,11 @@ pub fn centered_sum_squares(a: CsrRef<'_>, means: Option<&[f32]>) -> f64 {
 
 // ── sparse kernels ───────────────────────────────────────────────────────
 
-/// `(A − 1μᵀ) · B` for row-major `B` (`n_cols × l`); returns row-major
-/// `(n_rows × l)`. Each block computes its rows independently (per-row
-/// accumulation unchanged by blocking); blocks copy into the shared output
-/// under a lock — few, large copies.
+/// The product `(A − 1μᵀ) · B`, for a row-major `B` of `n_cols × l`, as a
+/// row-major `n_rows × l` matrix.
+///
+/// Each block of rows computes its rows on its own, so blocking does not change
+/// the result, and copies them into the output.
 ///
 /// # Panics
 /// Panics if `b.len() != n_cols * l`.
@@ -276,9 +288,11 @@ pub fn spmm(a: CsrRef<'_>, b: &[f32], l: usize, center: Option<&[f32]>) -> Vec<f
     spmm_blocks(&a, b, l, center)
 }
 
-/// `(A − 1μᵀ)ᵀ · Q` for row-major `Q` (`n_rows × l`); returns row-major
-/// `(n_cols × l)`. Bit-reproducible: per-block partials over a fixed row
-/// chunking, folded in block order.
+/// The product `(A − 1μᵀ)ᵀ · Q`, for a row-major `Q` of `n_rows × l`, as a
+/// row-major `n_cols × l` matrix.
+///
+/// The partial results of a fixed split of the rows are combined in order, so
+/// the result has the same bits on every run.
 ///
 /// # Panics
 /// Panics if `q.len() != n_rows * l`.
@@ -331,14 +345,12 @@ pub fn spmm_t(a: CsrRef<'_>, q: &[f32], l: usize, center: Option<&[f32]>) -> Vec
 
 /// `AᵀA` as a dense row-major `(n_cols × n_cols)` `f64` matrix, from one pass
 /// over the rows (each row contributes the outer product of its nonzeros).
-/// Accumulated in `f64` per fixed row chunk and folded in chunk order, so the
-/// result is bit-identical run to run; the fold's watermark drops each
-/// partial as soon as it merges, bounding live partials to the source's
-/// concurrency (the old implementation enforced the same bound with explicit
-/// batches of ≤ ~256 MB).
+/// Added up in `f64` over a fixed split of the rows and combined in order, so
+/// the result has the same bits on every run. Each partial result is freed as
+/// soon as it is combined, so no more are held than blocks are read at once.
 ///
 /// This is the exact-PCA route: after HVG selection `n_cols` is ~2000, so the
-/// Gram matrix is 32 MB and its eigendecomposition is cheap — no randomised
+/// Gram matrix is 32 MB and its eigendecomposition is cheap — no randomized
 /// approximation of the flat tail of the spectrum is needed at all.
 #[must_use]
 pub fn gram_matrix_blocks(src: &dyn RowBlocks) -> Vec<f64> {
@@ -359,7 +371,7 @@ pub fn gram_matrix_blocks(src: &dyn RowBlocks) -> Vec<f64> {
                 let (ca, va) = (ca as usize, f64::from(va));
                 for (&cb, &vb) in cols[p..].iter().zip(&vals[p..]) {
                     let cb = cb as usize;
-                    // Upper triangle only; symmetrised at the end.
+                    // Upper triangle only; symmetrized at the end.
                     let (lo, hi) = if ca <= cb { (ca, cb) } else { (cb, ca) };
                     acc[lo * m + hi] += va * f64::from(vb);
                 }
@@ -465,11 +477,11 @@ pub fn rsvd_sparse(a: CsrRef<'_>, opts: &RsvdOptions<'_>) -> RsvdResult {
     rsvd_blocks(&a, opts)
 }
 
-/// [`rsvd_sparse`] over any [`RowBlocks`] source, so a memory-mapped or
-/// streamed matrix takes the identical route (and gives identical numbers)
-/// as one in RAM. Every pass over the data goes through
-/// [`spmm_blocks`]/[`spmm_t_blocks`]; nothing but the `n × width` basis is
-/// held in memory.
+/// [`rsvd_sparse`] over any [`RowBlocks`] source, so a matrix read from disk
+/// takes the same route, and gives the same numbers, as one in memory.
+///
+/// Every pass over the data goes through [`spmm_blocks`] and
+/// [`spmm_t_blocks`], and only the `n × width` basis is held in memory.
 ///
 /// # Panics
 /// Panics if `center` is given with the wrong length, or if the small SVD

@@ -1,21 +1,20 @@
-//! `CompressedCsr`: a ~3-byte-per-nonzero in-RAM CSR for raw count
-//! matrices.
+//! `CompressedCsr`: a sparse matrix of raw counts in memory, at about 3 bytes
+//! per stored value.
 //!
-//! Gene indices are stored **delta-encoded `u16`** (rows sorted by column;
-//! first index absolute, subsequent gaps minus one — valid whenever
-//! `n_cols ≤ 65 536`, which every scRNA matrix satisfies). Values use the
-//! narrowest exact representation: **`u8`** when every stored value is an
-//! integer in `0..=255` (> 99.9 % of raw UMI matrices), **`u16`** up to
-//! `65 535`, else **`f32`**. `indptr` is `u64` — nnz can exceed 2³² at
-//! 10M cells. Bytes per nonzero: 3 (u8), 4 (u16), 6 (f32) plus one `u64`
-//! per row.
+//! - **Gene indices** are stored as `u16` gaps within each row, which is sorted
+//!   by column: the first index as it is, then each gap minus one. This works
+//!   whenever there are at most 65,536 genes, as in every single-cell matrix.
+//! - **Values** take the narrowest exact type: `u8` when every value is a whole
+//!   number from 0 to 255 (more than 99.9% of raw count matrices), `u16` up to
+//!   65,535, and `f32` otherwise.
+//! - **Row pointers** are `u64`, since a matrix of 10 million cells can hold more
+//!   than 2^32 values.
 //!
-//! Decoding a block is a prefix sum over deltas plus a widening of values
-//! — trivially vectorisable, ~1 GB/s per core. Implements [`RowBlocks`],
-//! so every kernel (QC, gene stats, sparse products, Gram) runs on the
-//! compressed form directly; the pipeline materialises only the HVG-subset
-//! matrix (2000 of 30k genes) as f32 CSR, keeping the peak at
-//! raw-compressed + HVG-float.
+//! A stored value takes 3 bytes with `u8` values, 4 with `u16` and 6 with `f32`,
+//! plus 8 bytes per row. Decoding a block is a running sum over the gaps and a
+//! widening of the values. The type implements [`RowBlocks`], so every kernel
+//! (quality control, gene statistics, sparse products, the Gram matrix) runs on
+//! the compressed form directly.
 
 #![allow(
     clippy::len_without_is_empty,
@@ -59,11 +58,12 @@ pub struct CompressedCsr {
 }
 
 impl CompressedCsr {
-    /// Compress a CSR matrix. Returns `None` when compression is not
-    /// possible: `n_cols > 65 536` (indices would not fit `u16` deltas) or
-    /// some row is not sorted by column index (delta encoding requires
-    /// order). Matrices from our constructors and the readers are always
-    /// sorted.
+    /// Compress a CSR matrix.
+    ///
+    /// Returns `None` when it cannot be compressed: when there are more than 65,536
+    /// columns, so the gaps would not fit in `u16`, or when some row is not sorted
+    /// by column, which the gap encoding needs. Matrices from this crate's
+    /// constructors and readers are always sorted.
     #[must_use]
     pub fn from_csr(m: &CsrMatrix) -> Option<Self> {
         if m.ncols > u16::MAX as usize + 1 {
@@ -132,12 +132,12 @@ impl CompressedCsr {
         })
     }
 
-    /// Decode to an f32 `CsrMatrix` (exact round trip: values are stored
-    /// exactly; indices reconstruct exactly).
+    /// Decode to an `f32` `CsrMatrix`. The values and indices come back exactly as
+    /// they were.
     ///
     /// # Panics
-    /// Panics if the stored arrays are internally inconsistent (impossible
-    /// for a matrix produced by [`Self::from_csr`]).
+    /// Panics if the stored arrays are inconsistent, which cannot happen for a
+    /// matrix made by [`Self::from_csr`].
     #[must_use]
     pub fn to_csr(&self) -> CsrMatrix {
         let nnz = self.deltas.len();

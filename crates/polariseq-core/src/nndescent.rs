@@ -1,30 +1,29 @@
-//! Approximate kNN via NN-Descent (Dong, Moses & Li 2011), built the way
-//! pynndescent does it:
+//! Approximate k-nearest neighbors by NN-Descent (Dong, Moses and Li 2011),
+//! built the way PyNNDescent builds them.
 //!
-//! 1. **Random-projection-tree forest initialisation.** Each tree splits the
-//!    data with random hyperplanes down to leaves of ~`k` points; every leaf
-//!    contributes its all-pairs distances. This puts every point next to
-//!    genuinely close points before the first iteration — far better than a
-//!    random start.
-//! 2. **Local join with new/old flags.** Each neighbour is `new` until it has
-//!    been joined once; each iteration samples `max_candidates` new and old
-//!    neighbours per node — *including reverse neighbours* — and only computes
-//!    new×new and new×old pairs. Pairs are pruned against the current worst
-//!    distance of both endpoints before the distance is computed.
-//! 3. **Bounded heaps, bounded memory.** One fixed-size max-heap per node
-//!    (index, distance, flag) — no hash sets, no per-node allocation per
-//!    iteration. Candidate generation and joins run over blocks of nodes,
-//!    emitting updates into buckets by destination range that are applied in
-//!    parallel with exclusive row access. Memory per iteration is bounded by
-//!    the block size, not by `n`.
-//! 4. **Deterministic.** All randomness comes from `splitmix(seed, ...)`
-//!    keyed by node/slot/iteration, and updates are applied in block order,
-//!    so the graph is identical whatever the thread count.
-//! 5. Early termination when fewer than `delta · n · k` heap entries changed.
+//! 1. **A forest of random-projection trees as the start.** Each tree splits the
+//!    points with random hyperplanes into leaves of about `k` points, and every
+//!    leaf contributes the distances between all its points. Every point starts
+//!    next to points that are already close, far better than a random start.
+//! 2. **The local join, with new and old flags.** A neighbor is new until it has
+//!    been joined once. Each iteration samples up to `max_candidates` new and
+//!    old neighbors of every point, reverse neighbors included, and computes only
+//!    the new-new and new-old pairs. A pair is skipped when it cannot beat the
+//!    current worst neighbor of either point.
+//! 3. **Bounded memory.** Each point keeps a fixed-size heap of its neighbors
+//!    (index, distance, flag), with no hash sets and no allocation per point and
+//!    iteration. Candidates and joins are processed over blocks of points, and
+//!    their updates are sorted into buckets by destination and applied in
+//!    parallel. Memory per iteration depends on the block size, not on `n`.
+//! 4. **The same graph at any thread count.** Every random choice comes from
+//!    `splitmix(seed, ...)`, keyed by point, slot and iteration, and updates are
+//!    applied in block order.
+//! 5. **Early stopping.** The iterations stop when fewer than `delta · n · k`
+//!    neighbor entries change.
 //!
-//! The tree initialisation and the local join follow PyNNDescent
-//! (BSD-2-Clause, Copyright (c) 2018 Leland McInnes), whose notice
-//! `THIRD_PARTY_NOTICES.md` keeps.
+//! The tree start and the local join follow PyNNDescent (BSD-2-Clause,
+//! Copyright (c) 2018 Leland McInnes), whose notice `THIRD_PARTY_NOTICES.md`
+//! keeps.
 
 #![allow(
     clippy::doc_markdown,
@@ -42,15 +41,15 @@ use rayon::prelude::*;
 /// Options for NN-Descent. Zero means "auto" for the sized fields.
 #[derive(Debug, Clone)]
 pub struct NndescentOptions {
-    /// Number of nearest neighbours per node.
+    /// Number of nearest neighbors per node.
     pub k: usize,
     /// New/old candidates sampled per node per iteration (0 → `min(60, 2k)`).
     pub max_candidates: usize,
     /// Maximum iterations (0 → `max(5, round(log2 n))`).
     pub max_iterations: usize,
-    /// Stop when fewer than `delta · n · k` neighbour entries changed.
+    /// Stop when fewer than `delta · n · k` neighbor entries changed.
     pub delta: f64,
-    /// Random-projection trees for initialisation (0 → `min(48, 8 + √n/10)`).
+    /// Random-projection trees for initialization (0 → `min(48, 8 + √n/10)`).
     pub n_trees: usize,
     /// Leaf size of the trees (0 → `max(10, k)`).
     pub leaf_size: usize,
@@ -117,7 +116,7 @@ impl Rng {
 const EMPTY: u32 = u32::MAX;
 
 /// `n` rows of `k` `(index, distance, flag)` entries, each row a max-heap on
-/// distance (root = worst neighbour so far).
+/// distance (root = worst neighbor so far).
 struct NeighborHeap {
     k: usize,
     idx: Vec<u32>,
@@ -281,7 +280,7 @@ const BLOCK: usize = 4096;
 /// Nodes per parallel generation task inside a block.
 const GEN_CHUNK: usize = 512;
 
-/// A neighbour candidate for `dest`; every push made through updates is
+/// A neighbor candidate for `dest`; every push made through updates is
 /// flagged `new`, so no flag field is carried (12 bytes, not 16).
 #[derive(Clone, Copy)]
 struct Update {
@@ -302,7 +301,7 @@ fn rows_per_bucket(n: usize) -> usize {
     n.div_ceil(N_BUCKETS).max(1)
 }
 
-/// Apply neighbour updates: `gen[chunk][bucket]` is consumed in chunk order
+/// Apply neighbor updates: `gen[chunk][bucket]` is consumed in chunk order
 /// per bucket, each bucket by one task with exclusive rows. Returns the
 /// number of heap entries that changed.
 fn apply_updates(heap: &mut NeighborHeap, gen: &[Vec<Vec<Update>>], n: usize) -> usize {
@@ -458,14 +457,13 @@ fn rp_tree_leaves(
     rp_tree_leaves(data, d, right, base + split, leaf_size, rng, depth + 1, out);
 }
 
-/// Subtrees of at most this many points have their rows copied into one
-/// buffer before they are split further, so the levels below read memory in
-/// order. Larger ones are split in place on the input, as the copy would be
-/// as large as the subtree: random hyperplanes split unevenly, and on the
-/// 1.3M-cell brain atlas the subtrees reaching the sequential recursion held
-/// up to 49% of all cells (99th percentile 24%), so one copy per worker
-/// thread was the peak of the whole neighbours step (about 1 KB per cell at
-/// 16 threads). 2^20 points of 50 dimensions is 210 MB per thread.
+/// Subtrees of at most this many points have their rows copied into one buffer
+/// before they are split further, so the levels below read memory in order.
+///
+/// Larger subtrees are split in place, because the copy would be as large as
+/// the subtree: random hyperplanes split unevenly, and on the 1.3 million-cell
+/// brain atlas a subtree could hold up to 49% of the cells. 2^20 points of 50
+/// dimensions take 210 MB per thread.
 pub const GATHER_MAX: usize = 1 << 20;
 
 /// The sequential recursion of a subtree, on the input rows (`ids` index
@@ -644,7 +642,7 @@ fn build_tree(
 
 // ── the algorithm ────────────────────────────────────────────────────────
 
-/// Neighbours per node that [`nndescent`] returns for `n_obs` points: `k`,
+/// Neighbors per node that [`nndescent`] returns for `n_obs` points: `k`,
 /// or fewer when there are not `k` other points.
 #[must_use]
 pub fn effective_k(n_obs: usize, k: usize) -> usize {
@@ -689,12 +687,12 @@ pub fn nndescent(
 
 /// [`nndescent`] with the graph written into the caller's arrays, which may be
 /// memory-mapped files: `indptr` (`n_obs + 1`), and `indices` and `dists`
-/// (`n_obs × effective_k(n_obs, k)` each, the most a graph can hold). Returns
-/// the number of entries written, which is that size unless some point found
-/// fewer than `k` neighbours; entries past it are untouched.
+/// (`n_obs × effective_k(n_obs, k)` each, the most a graph can hold).
 ///
-/// The search itself holds its working set in memory (the neighbour heaps, the
-/// candidate lists); only the finished graph goes to the arrays.
+/// Returns the number of entries written. It is that size unless some point
+/// found fewer than `k` neighbors, and entries past it are left untouched. The
+/// search holds its working set (the neighbor heaps and candidate lists) in
+/// memory, and only the finished graph goes to the arrays.
 ///
 /// # Panics
 /// Panics if `data` is empty, `k == 0`, or an output array is too short.
@@ -766,7 +764,7 @@ pub fn nndescent_into(
         }
     };
 
-    // ── 1. RP-tree forest initialisation ──────────────────────────────
+    // ── 1. RP-tree forest initialization ──────────────────────────────
     let forest: Vec<Tree> = (0..n_trees)
         .into_par_iter()
         .map(|t| {
@@ -818,7 +816,7 @@ pub fn nndescent_into(
     drop(forest);
     tick("rp-forest leaf pairs + apply", &mut lap);
 
-    // Fill any remaining empty slots with random neighbours (own row only).
+    // Fill any remaining empty slots with random neighbors (own row only).
     {
         let kk = k;
         heap.idx
@@ -893,7 +891,7 @@ pub fn nndescent_into(
             apply_candidates(&mut old_cand, &gen, n, false);
         }
 
-        // 2b. Neighbours that made it into a node's *new* list are now old.
+        // 2b. Neighbors that made it into a node's *new* list are now old.
         {
             let nc = &new_cand;
             heap.idx

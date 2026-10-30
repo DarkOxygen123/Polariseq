@@ -15,39 +15,47 @@
 // centroids, w ridge coefficients); exact float comparisons (zero weights)
 // are deliberate.
 
-//! Harmony batch correction (Korsunsky et al., "Fast, sensitive and accurate
-//! integration of single-cell data with Harmony", Nature Methods 16, 1289,
-//! 2019).
+//! Harmony batch correction (Korsunsky et al. 2019, "Fast, sensitive and
+//! accurate integration of single-cell data with Harmony", Nature Methods 16,
+//! 1289).
 //!
-//! Cells are assigned softly to `K` clusters on the unit sphere. The
-//! assignment favours clusters that hold every batch in its overall
-//! proportion (the diversity penalty, `theta`). Within each cluster a ridge
-//! regression on the batch indicators estimates how far each batch sits from
-//! the cluster's centre, and every cell is moved back by those offsets,
-//! weighted by its assignments. Clustering and correction alternate until the
-//! objective stops falling.
+//! Cells are assigned softly to `K` clusters on the unit sphere. The assignment
+//! favors clusters that hold every batch in its overall proportion, which the
+//! diversity penalty `theta` controls. Within each cluster, a ridge regression
+//! on the batch indicators estimates how far each batch sits from the cluster's
+//! center, and every cell is moved back by those offsets, weighted by its
+//! assignments. Clustering and correction alternate until the objective stops
+//! falling.
 //!
-//! The algorithm follows the paper (Methods and Supplementary Note) and
-//! harmony-pytorch (https://github.com/lilab-bcb/harmony-pytorch, BSD-3-Clause,
-//! Copyright (c) 2019-2020 The Broad Institute, Inc. and The General Hospital
-//! Corporation; see `THIRD_PARTY_NOTICES.md`): k-means for the starting
-//! centroids, assignment rounds over shuffled blocks of cells with the
-//! tallies of the other cells fixed, the objective and its convergence
-//! windows, and the mixture-of-experts ridge correction. The options R
-//! harmony documents (`harmony_options`, `RunHarmony`) are supported as
-//! documented: a diversity penalty and a ridge penalty per batch variable,
-//! the ridge penalty estimated as `alpha` times a batch's expected number of
-//! cells in a cluster when none is given, and `batch_prop_cutoff`.
+//! # Agreement with the reference implementations
 //!
-//! The data layout is our own. The embedding is read where it lies (often a
-//! memory-mapped result file) and the corrected one is written into the
-//! caller's buffer; the soft assignments (`n × K` `f32`) are the only
-//! working array the size of the data, distances to the centroids are
-//! computed a tile of cells at a time, and the shuffled order is an index
-//! list. Tallies, ridge systems and the objective are kept in `f64`. One
-//! `ChaCha8` stream draws every random choice, and sums over cells run in
-//! fixed chunks merged in order, so the result does not depend on the number
-//! of threads.
+//! The algorithm follows the paper's Methods and Supplementary Note, and
+//! harmony-pytorch (<https://github.com/lilab-bcb/harmony-pytorch>,
+//! BSD-3-Clause, Copyright (c) 2019-2020 The Broad Institute, Inc. and The
+//! General Hospital Corporation, see `THIRD_PARTY_NOTICES.md`):
+//!
+//! - k-means for the starting centroids,
+//! - assignment rounds over shuffled blocks of cells, with the other cells'
+//!   tallies held fixed,
+//! - the objective and its convergence windows,
+//! - the mixture-of-experts ridge correction.
+//!
+//! The options R harmony documents (`harmony_options`, `RunHarmony`) are
+//! supported as documented: a diversity penalty and a ridge penalty for each
+//! batch variable, the ridge penalty estimated as `alpha` times a batch's
+//! expected number of cells in a cluster when none is given, and
+//! `batch_prop_cutoff`.
+//!
+//! # Implementation notes
+//!
+//! The embedding is read where it lies, often a memory-mapped result file, and
+//! the corrected one is written into the caller's buffer. The soft assignments
+//! (`n × K` values of `f32`) are the only working array the size of the data:
+//! distances to the centroids are computed a tile of cells at a time, and the
+//! shuffled order is a list of indices. Tallies, ridge systems and the
+//! objective are kept in `f64`. One `ChaCha8` stream draws every random choice,
+//! and sums over cells run in fixed chunks combined in order, so the result does
+//! not depend on the number of threads.
 
 use faer::linalg::matmul::matmul;
 use faer::{Accum, Mat, MatMut, MatRef, Par};
@@ -80,16 +88,15 @@ pub struct Covariate<'a> {
 /// Options for Harmony, with harmonypy's defaults.
 #[derive(Debug, Clone)]
 pub struct HarmonyOptions {
-    /// Number of clusters; `None` is `min(round(n / 30), 100)`.
+    /// Number of clusters. `None` gives `min(round(n / 30), 100)`.
     pub n_clusters: Option<usize>,
     /// Diversity penalty, one per batch variable (or one for all). Larger
     /// values push harder for clusters that mix the batches.
     pub theta: Vec<f32>,
     /// Width of the soft assignment: smaller is closer to hard k-means.
     pub sigma: f32,
-    /// Ridge penalty, one per batch variable (or one for all); `None`
-    /// estimates it per cluster and batch as `alpha` times the expected
-    /// number of cells.
+    /// Ridge penalty, one for each batch variable or one for all. `None` estimates
+    /// it for each cluster and batch as `alpha` times the expected number of cells.
     pub lambda: Option<Vec<f32>>,
     /// Scale of the estimated ridge penalty.
     pub alpha: f32,
@@ -136,7 +143,7 @@ impl Default for HarmonyOptions {
 pub struct HarmonyReport {
     /// Number of clusters.
     pub n_clusters: usize,
-    /// The objective after initialisation and after each clustering.
+    /// The objective after initialization and after each clustering.
     pub objective: Vec<f64>,
     /// Assignment rounds of each clustering.
     pub kmeans_rounds: Vec<usize>,
@@ -179,7 +186,7 @@ pub enum HarmonyError {
     /// An option or an input outside its range.
     #[error("{0}")]
     BadOption(String),
-    /// The optimisation produced a non-finite or non-positive quantity.
+    /// The optimization produced a non-finite or non-positive quantity.
     #[error("Harmony numerical error during {0}")]
     Numerical(String),
 }
@@ -191,13 +198,13 @@ pub fn default_n_clusters(n_obs: usize) -> usize {
     ((n_obs as f64 / 30.0).round_ties_even() as usize).clamp(1, 100)
 }
 
-/// Run Harmony on a single batch variable; returns the corrected embedding.
+/// Run Harmony on a single batch variable, and return the corrected embedding.
 ///
-/// `embedding` is `(n_obs × n_pcs)` row-major, `batch_labels` a batch code
-/// per cell (codes `0..=max`).
+/// `embedding` is `n_obs × n_pcs`, row-major, and `batch_labels` holds a batch
+/// code for each cell (codes `0..=max`).
 ///
 /// # Errors
-/// Returns [`HarmonyError`] on invalid inputs or a numerical failure.
+/// Returns [`HarmonyError`] for invalid inputs or a numerical failure.
 pub fn harmony(
     embedding: &[f32],
     batch_labels: &[u32],
@@ -1147,8 +1154,8 @@ fn centroid_dots(y: MatRef<'_, f32>, x: &[f32], mt: usize, d: usize) -> Mat<f32>
 
 /// One cell's assignments from its centroid dot products: the logits
 /// `−2(1 − y·z)/σ` plus the batch penalties, shifted by their maximum,
-/// exponentiated and normalised. Returns the cell's `Σ R·dist` and
-/// `Σ R ln R`, or `None` when the normaliser is not finite and positive.
+/// exponentiated and normalized. Returns the cell's `Σ R·dist` and
+/// `Σ R ln R`, or `None` when the normalizer is not finite and positive.
 #[inline]
 fn assign_cell(
     dots: &[f32],
@@ -1255,8 +1262,8 @@ fn cell_penalty<'p>(pen: &'p [f32], batches: &[u32], k: usize, buf: &'p mut [f32
 
 /// Starting centroids: k-means++ seeding (Arthur & Vassilvitskii 2007) on the
 /// normalized cells, then Lloyd iterations until no cell changes cluster or
-/// [`INIT_LLOYD`] passes. Seeding draws each next centre with probability
-/// proportional to the squared distance to the nearest centre so far; the
+/// [`INIT_LLOYD`] passes. Seeding draws each next center with probability
+/// proportional to the squared distance to the nearest center so far; the
 /// draw walks chunk sums in a fixed order, so the result does not depend on
 /// the number of threads.
 fn kmeans_pp(x: &[f32], n: usize, d: usize, k: usize, rng: &mut ChaCha8Rng) -> Vec<f32> {
@@ -1460,7 +1467,7 @@ mod tests {
         (z, batch, kind)
     }
 
-    /// Mean distance between the two batches' centres within each cell type.
+    /// Mean distance between the two batches' centers within each cell type.
     fn batch_gap(z: &[f32], d: usize, batch: &[u32], kind: &[u32]) -> f32 {
         let mut gap = 0.0;
         for c in 0..3 {
@@ -1483,7 +1490,7 @@ mod tests {
         gap
     }
 
-    /// Mean distance between the cell types' centres.
+    /// Mean distance between the cell types' centers.
     fn type_gap(z: &[f32], d: usize, kind: &[u32]) -> f32 {
         let mut m = vec![vec![0.0_f32; d]; 3];
         let mut cnt = [0.0_f32; 3];
@@ -1583,7 +1590,7 @@ mod tests {
 
     #[test]
     fn log_space_assignments_equal_the_weighted_softmax() {
-        // exp(-dist/σ) times the diversity weight to the power θ, normalised.
+        // exp(-dist/σ) times the diversity weight to the power θ, normalized.
         let dist = [0.2_f32, 1.2, 0.8];
         let dots: Vec<f32> = dist.iter().map(|&x| 1.0 - x / 2.0).collect();
         let ratio = [1.3_f32, 0.6, 2.1];

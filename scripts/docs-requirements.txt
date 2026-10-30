@@ -1,0 +1,7 @@
+# The website's build tools: pip install -r scripts/docs-requirements.txt, then mkdocs serve.
+# The site reads the code without importing it, so the Rust core need not be built.
+mkdocs==1.6.1
+mkdocs-material==9.8.0
+mkdocstrings==1.0.8
+mkdocstrings-python==2.0.10
+mkdocs-jupyter==0.27.0

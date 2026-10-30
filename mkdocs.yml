@@ -1,0 +1,170 @@
+site_name: Polariseq
+site_url: https://darkoxygen123.github.io/Polariseq/
+site_description: Atlas-scale single-cell analysis on the computer you have.
+site_author: Uthamkumar M, Abhi Dutta, Trayambak Basak
+repo_url: https://github.com/DarkOxygen123/Polariseq
+repo_name: DarkOxygen123/Polariseq
+edit_uri: ""
+copyright: Copyright &copy; 2026 Uthamkumar M, Abhi Dutta and Trayambak Basak. PolyForm Noncommercial 1.0.0.
+
+# The site is built from docs/, but docs/ also holds the paper, the handbook and other private
+# material. Everything is excluded except the pages listed here, so nothing private reaches the
+# built site even if it is not in the nav.
+docs_dir: docs
+exclude_docs: |
+  /*
+  !/index.md
+  !/install.md
+  !/changelog.md
+  !/QUICKSTART.md
+  !/METHODS.md
+  !/PLOTTING.md
+  !/getting-started/
+  !/how-to/
+  !/api/
+  !/background/
+  !/rust/
+  !/assets/
+  !/stylesheets/
+
+# A nav entry to a missing or excluded page, a page left out of the nav, and a link to an anchor
+# that does not exist fail the strict build.
+validation:
+  nav:
+    not_found: warn
+    omitted_files: warn
+  links:
+    anchors: warn
+
+# The function pages of the API reference are reached from their namespace's page.
+not_in_nav: |
+  /api/*/*.md
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Installation: install.md
+      - A first analysis: QUICKSTART.md
+      - Every command, on one dataset: getting-started/every-command.ipynb
+  - How-to guides:
+      - how-to/index.md
+      - Analyze a dataset larger than memory: how-to/large-data.md
+      - Set the memory and threads: how-to/memory-and-threads.md
+      - Read several files as one dataset: how-to/several-files.md
+      - Remove doublets: how-to/doublets.md
+      - Correct for batches: how-to/batches.md
+      - Compare conditions: how-to/compare-conditions.md
+      - Name the cell types: how-to/cell-types.md
+      - Try other settings: how-to/compare-settings.md
+      - Save and continue later: how-to/save-and-reopen.md
+      - Hand results to other tools: how-to/export.md
+      - Make figures: PLOTTING.md
+      - Run the whole analysis in one call: how-to/one-call.md
+      - Run on a cluster node: how-to/run-on-a-cluster.md
+      - Example scripts:
+          - how-to/examples/index.md
+          - A first analysis: how-to/examples/01_quickstart.md
+          - Full workflow: how-to/examples/02_full_workflow.md
+          - Out of core: how-to/examples/03_large_data_out_of_core.md
+          - Plotting: how-to/examples/04_plotting.md
+          - Comparing conditions: how-to/examples/05_comparing_conditions.md
+          - A large run: how-to/examples/06_large_run.md
+          - Settings, saving, exporting: how-to/examples/07_settings_saving_exporting.md
+  - API reference:
+      - api/index.md
+      - ps: api/ps/index.md
+      - The data object: api/data/index.md
+      - ps.pp: api/pp/index.md
+      - ps.tl: api/tl/index.md
+      - ps.get: api/get/index.md
+      - ps.pl: api/pl/index.md
+      - Results and helpers: api/helpers/index.md
+  - Background:
+      - background/index.md
+      - The analysis object: background/data-object.md
+      - Memory and planning: background/memory.md
+      - Out-of-core analysis: background/out-of-core.md
+      - Reproducible results: background/reproducibility.md
+      - Methods: METHODS.md
+  - Rust: rust/index.md
+  - Changelog: changelog.md
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+  # The fonts are bundled with the site (docs/assets/fonts, declared in the stylesheet), so pages
+  # load nothing from Google Fonts.
+  font: false
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+extra_css:
+  - stylesheets/polariseq.css
+
+hooks:
+  - scripts/docs_hooks.py
+
+plugins:
+  - search
+  - mkdocs-jupyter:
+      execute: false
+      include_source: true
+      include_requirejs: false
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [python]
+          options:
+            allow_inspection: false
+            extensions:
+              - scripts/docs_griffe.py:PolariseqDocstrings
+            docstring_style: google
+            docstring_options:
+              # A Returns section is one description (types come from the signatures).
+              returns_named_value: false
+              returns_multiple_items: false
+              warn_missing_types: false
+            docstring_section_style: table
+            members_order: source
+            merge_init_into_class: true
+            separate_signature: true
+            show_signature_annotations: true
+            show_source: false
+            show_symbol_type_heading: false
+            show_root_heading: true
+            show_root_full_path: false
+            filters: ["!^_"]
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences

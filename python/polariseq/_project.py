@@ -64,7 +64,7 @@ class ProjectNotSet(RuntimeError):
 
 
 class Project:
-    """A project folder. Create or open one with :func:`project`."""
+    """A project folder: create or open one with ``ps.project``."""
 
     def __init__(self, path: str | Path) -> None:
         from polariseq import __version__
@@ -81,6 +81,7 @@ class Project:
 
     @property
     def scratch(self) -> Path:
+        """The folder of running steps' scratch files."""
         return self.path / "scratch"
 
     def run_dir(self, name: str) -> Path:
@@ -154,16 +155,25 @@ class Project:
 def project(path: str | Path) -> Project:
     """Declare the project folder of this session, creating it if needed.
 
-    Everything Polariseq writes to disk from now on goes into it: the
-    on-disk copies an out-of-core analysis reads, the intermediates, and the
-    scratch files of running steps (the spill folder of
-    ``ps.process_diskbacked`` included).
+    Everything Polariseq writes to disk from now on goes into it: the copies of
+    the counts an out-of-core analysis reads, the results of the steps, saved
+    analyses and the scratch files of running steps. Put it on a fast local
+    disk. Its ``README.md`` says what each part holds and what may be deleted.
 
     Args:
-        path: The folder (created if missing); `~` is expanded.
+        path: The folder (created if missing); ``~`` is expanded.
 
     Returns:
-        The :class:`Project`, now the session's project folder.
+        The project. ``status()`` gives the space each part of it takes.
+
+    Examples:
+        ```python
+        proj = ps.project("my_analysis")
+        proj.status()
+        ```
+
+    See also:
+        ``ps.load``, ``ps.set_budget``.
     """
     global _CURRENT
     from polariseq import set_budget

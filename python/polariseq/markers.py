@@ -94,7 +94,7 @@ TISSUE_ALIASES = {
 
 
 def get_tissue_markers(tissue: str) -> dict[str, list[str]]:
-    """Get marker genes for a specific tissue/system.
+    """The marker genes of one tissue's cell types, from the curated table.
 
     Args:
         tissue: Tissue name (e.g., 'immune', 'heart', 'brain'). Aliases
@@ -102,13 +102,31 @@ def get_tissue_markers(tissue: str) -> dict[str, list[str]]:
 
     Returns:
         Dict mapping cell type name → list of marker gene symbols.
+
+    Examples:
+        ```python
+        from polariseq.markers import get_tissue_markers
+
+        markers = get_tissue_markers("immune")
+        ```
     """
     key = TISSUE_ALIASES.get(tissue.lower(), tissue.lower())
     return MARKER_DB.get(key, {})
 
 
 def get_all_markers() -> dict[str, list[str]]:
-    """Get all markers from all tissues (flattened)."""
+    """The marker genes of every cell type in the curated table, over all tissues.
+
+    Returns:
+        Dict mapping cell type name → list of marker gene symbols, merged over the tissues.
+
+    Examples:
+        ```python
+        from polariseq.markers import get_all_markers
+
+        markers = get_all_markers()
+        ```
+    """
     all_markers: dict[str, list[str]] = {}
     for tissue_dict in MARKER_DB.values():
         for cell_type, markers in tissue_dict.items():
@@ -125,7 +143,7 @@ def score_cell_type(
     gene_scores: dict[str, float],
     markers: list[str],
 ) -> float:
-    """Score a cell type match given per-gene scores.
+    """How well a cell type's markers match a set of per-gene scores: their mean.
 
     Args:
         gene_scores: Dict mapping gene name → score (e.g., mean expression).
@@ -133,6 +151,13 @@ def score_cell_type(
 
     Returns:
         Mean score across markers that are present in gene_scores.
+
+    Examples:
+        ```python
+        from polariseq.markers import score_cell_type
+
+        score_cell_type({"CD3E": 2.1, "CD3D": 1.8}, ["CD3E", "CD3D", "CD2"])
+        ```
     """
     found = [gene_scores[m] for m in markers if m in gene_scores]
     if not found:

@@ -1,28 +1,37 @@
-//! The on-disk block store's two layouts, and the writer every copy uses.
+//! The two layouts of the block store on disk, and the writer every copy uses.
 //!
-//! - **Plain**: `{prefix}.data` (f32 values) and `{prefix}.indices` (u32 gene
-//!   ids), 8 bytes a stored value.
-//! - **Compact** (the default for new stores): rows in chunks of
-//!   [`CHUNK_ROWS`]. In each chunk the gene ids (gaps within a row when the row
-//!   is sorted, absolute otherwise) and the values (u16 when every value is a
-//!   whole number from 0 to 65,535, else the f32 bits) are split into byte
-//!   planes, and each plane is deflated on its own. Planes keep the bytes that
-//!   vary (the low ones) apart from those that are nearly always zero, which
-//!   is what lets a general compressor come close to the entropy of count
-//!   data: measured 1.24 bytes a value on the human fetal atlas, against 8.
+//! - **Plain**: `{prefix}.data` (`f32` values) and `{prefix}.indices` (`u32`
+//!   gene ids), 8 bytes per stored value.
+//! - **Compact**, the default for new stores: rows in chunks of [`CHUNK_ROWS`].
+//!   In each chunk the gene ids and the values are split into byte planes, and
+//!   each plane is compressed (deflate) on its own. Gene ids are stored as gaps
+//!   within a row when the row is sorted, and as they are otherwise. Values are
+//!   stored as `u16` when every value is a whole number from 0 to 65,535, and as
+//!   the `f32` bits otherwise.
 //!
-//! Decoding gives back exactly the f32 and u32 arrays the plain layout holds
-//! (a value is narrowed only when it comes back bit for bit), so every result
-//! computed from a compact store is identical to one computed from a plain
-//! store. Both layouts keep `{prefix}.indptr` (u64 row pointers, resident when
-//! the store is open). A compact store adds `{prefix}.cz` (the chunks one after
-//! another) and `{prefix}.czi` (a magic word, the chunk size in rows, then the
-//! byte offset of every chunk and of the end). Every chunk carries a CRC-32 of
-//! its planes, checked before decoding: raw deflate has no checksum of its own,
-//! and a damaged byte must be an error, never a wrong count.
+//! Keeping the bytes that vary (the low ones) apart from those that are nearly
+//! always zero is what lets a general-purpose compressor come close to the
+//! information content of count data: 1.24 bytes per value on the human fetal
+//! atlas, against 8.
 //!
-//! The layout of new stores is compact unless `POLARISEQ_STORE=plain`; a store
-//! is read in whichever layout it was written.
+//! Decoding gives back exactly the `f32` and `u32` arrays the plain layout
+//! holds, since a value is narrowed only when it comes back bit for bit. Every
+//! result computed from a compact store is therefore identical to one computed
+//! from a plain store.
+//!
+//! # Files
+//!
+//! - Both layouts keep `{prefix}.indptr`, the `u64` row pointers, held in memory
+//!   while the store is open.
+//! - A compact store adds `{prefix}.cz`, the chunks one after another, and
+//!   `{prefix}.czi`: a magic word, the chunk size in rows, then the byte offset
+//!   of every chunk and of the end.
+//! - Every chunk carries a CRC-32 of its planes, checked before decoding. Raw
+//!   deflate has no checksum of its own, and a damaged byte must be an error,
+//!   never a wrong count.
+//!
+//! New stores are compact unless `POLARISEQ_STORE=plain` is set. A store is
+//! read in whichever layout it was written.
 
 use std::fs::File;
 use std::io::{self, BufWriter, Read, Write};
@@ -49,7 +58,7 @@ const LEVEL: u32 = 1;
 pub enum Layout {
     /// f32 values and u32 gene ids, 8 bytes a stored value.
     Plain,
-    /// Byte planes deflated per chunk of rows; lossless.
+    /// Byte planes, each compressed on its own, per chunk of rows. Lossless.
     Compact,
 }
 
@@ -192,7 +201,8 @@ impl StoreWriter {
         Ok(())
     }
 
-    /// Write what is pending and the row pointers; returns the stored values.
+    /// Write what is pending and the row pointers, and return the number of stored
+    /// values.
     ///
     /// # Errors
     /// Returns an error if a write fails.
@@ -395,9 +405,9 @@ fn inflate_plane(buf: &[u8], pos: &mut usize, n: usize, out: &mut Vec<u8>) -> io
     Ok(())
 }
 
-/// Decode a chunk written by [`encode_chunk`], appending its values and gene
-/// ids to `data` and `indices`. `lens` are its rows' lengths (from the row
-/// pointers); `scratch` is reused between calls.
+/// Decode a chunk written by [`encode_chunk`], appending its values and gene ids
+/// to `data` and `indices`. `lens` holds its rows' lengths, from the row
+/// pointers, and `scratch` is reused between calls.
 ///
 /// # Errors
 /// Returns an error if the bytes are not a well-formed chunk of these rows.

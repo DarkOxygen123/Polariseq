@@ -192,16 +192,19 @@ impl PySparseMatrix {
         })
     }
 
+    /// The shape, (cells, features).
     #[getter]
     fn shape(&self) -> (usize, usize) {
         self.inner.shape()
     }
 
+    /// Number of stored values.
     #[getter]
     fn nnz(&self) -> usize {
         self.inner.nnz()
     }
 
+    /// Number of dimensions: 2.
     #[getter]
     fn ndim(&self) -> usize {
         2

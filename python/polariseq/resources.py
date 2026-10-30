@@ -369,11 +369,11 @@ DEFAULT_RAM_FRACTION = 0.75
 
 @dataclass(frozen=True)
 class Budget:
-    """What Polariseq may use for one workload.
+    """The memory and threads Polariseq may use, as ``ps.set_budget`` sets them.
 
     Attributes:
-        ram_bytes: Ceiling for in-memory data structures.
-        threads: Worker threads for parallel kernels.
+        ram_bytes: The most memory Polariseq may hold, in bytes.
+        threads: The worker threads of every parallel step.
         spill_dir: Where out-of-core scratch files are written.
         spill_bytes: Ceiling for those files.
         allow_lossy: Whether the planner may trade accuracy for fit. Off by
@@ -453,10 +453,12 @@ class Budget:
 
     @property
     def ram_gb(self) -> float:
+        """The memory budget, in gigabytes."""
         return self.ram_bytes / _GB
 
     @property
     def spill_gb(self) -> float:
+        """The space out-of-core scratch files may take, in gigabytes."""
         return self.spill_bytes / _GB
 
     def __repr__(self) -> str:  # pragma: no cover - display only

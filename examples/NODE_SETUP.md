@@ -131,7 +131,7 @@ python examples/06_large_run.py /data/atlas.h5ad \
 | `--min-genes` | fewest genes for a cell to be kept. A property of your data: 200 suits a droplet dataset with about 30,000 genes. The script warns if it removes most cells |
 | `--n-hvg` | highly variable genes (2000); PCA and every later step use only these |
 | `--umap` / `--no-umap` | compute the UMAP and draw it (on by default). It is the slowest step at scale; `--no-umap` for a first pass |
-| `--color-by` | input columns to colour extra UMAPs by, comma-separated |
+| `--color-by` | input columns to color extra UMAPs by, comma-separated |
 | `--keep-obs` | columns of the input's cell table to copy into `cells.tsv.gz`, comma-separated (an id, cell types, donors), for example `--keep-obs soma_joinid,cell_type,donor_id`. A name the input lacks is declined at the start |
 
 **Try it small first.** Run it with no file (it uses the bundled fixture), and
@@ -267,12 +267,12 @@ Every run of example 06 writes:
 | `qc.png` | cells by genes detected and by counts: look at it to choose `--min-genes` |
 | `pca.png` | variance explained by each principal component |
 | `clusters.png` | cells per cluster, largest first |
-| `umap.png` | the embedding coloured by cluster; with many clusters the largest are named on the data instead of a legend; `umap_<column>.png` for each `--color-by` column |
+| `umap.png` | the embedding colored by cluster; with many clusters the largest are named on the data instead of a legend; `umap_<column>.png` for each `--color-by` column |
 | `resources.png` | memory, free memory and disk against time (section 6) |
 
 Every figure covers every cell. The histograms use bins spaced evenly on a log
 scale, and above a million cells the UMAP is drawn as an image of binned cells
-(each pixel in the colour of most of its cells, its strength from how many
+(each pixel in the color of most of its cells, its strength from how many
 there are), which takes seconds where a scatter of tens of millions of points
 takes minutes and turns into a blot. The same figures come from
 `ps.pl.overview(adata, out)` on any analysis. `run_summary.md` states the run
@@ -292,7 +292,7 @@ the pipeline returns.
 |---|---|
 | `declined: no mode fits this budget` | the plan found no way to stay within `--ram-gb`. Raise it, free memory, or use a larger machine. It is declined before anything is read |
 | `WARNING: --min-genes 200 removed 98% of the cells` | the threshold does not suit the data. Lower it (see `qc.png`) |
-| `declined: X of ... does not hold raw counts` | the files hold normalized or log-transformed values. Polariseq reads X; write the raw counts to X (the message names `layers/counts` or `raw/X` if the file has them), or pass `--not-counts` to analyse it anyway |
+| `declined: X of ... does not hold raw counts` | the files hold normalized or log-transformed values. Polariseq reads X; write the raw counts to X (the message names `layers/counts` or `raw/X` if the file has them), or pass `--not-counts` to analyze it anyway |
 | `declined: the datasets share no genes` | the files name their genes differently (symbols in one, Ensembl ids in another); make them match. A `WARNING: only N genes are in every file` means the same, partly |
 | `Rust is not installed` | re-run `setup_node.sh` with `--install-rust`, or install from rustup.rs, or build a wheel elsewhere (section 4) |
 | `linker 'cc' not found` | no C compiler: `module load gcc` or install build-essential |

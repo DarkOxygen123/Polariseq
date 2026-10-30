@@ -65,7 +65,7 @@ coordinates.
 ps.tl.rank_genes_groups(adata, groupby="leiden")
 print(ps.get.markers(adata, n=5))                     # top genes of each cluster
 
-ps.tl.auto_annotate(adata, tissue="blood")            # PanglaoDB markers, offline
+ps.tl.auto_annotate(adata, tissue="blood")            # bundled marker tables, no download
 ps.pl.umap(adata, color="cell_type")
 ps.pl.dotplot(adata, markers=["CD3D", "CD8A", "MS4A1", "LYZ"], groupby="cell_type")
 ```

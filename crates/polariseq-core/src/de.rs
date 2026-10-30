@@ -136,15 +136,16 @@ pub fn rank_genes_groups(
     rank_genes_groups_from_stats(&stats, None)
 }
 
-/// Welch's t-test for every group from per-cluster statistics: phase 2 of
-/// [`rank_genes_groups`], shared with the out-of-core path, which streams
-/// the same statistics from a file.
+/// Welch's t-test for every group from per-cluster statistics: the second stage
+/// of [`rank_genes_groups`], shared with the out-of-core path, which reads the
+/// same statistics from a file.
 ///
 /// `gene_keep` restricts the test to a subset of genes, as if the others had
-/// been removed from the matrix (`filter_genes`): the Benjamini-Hochberg
+/// been removed from the matrix (`filter_genes`), and the Benjamini-Hochberg
 /// adjustment then counts only the genes tested. Gene indices in the result
-/// refer to the genes of `stats`. Cells are those with a label below
-/// `stats.n_clusters`; the rest were excluded when the statistics were made.
+/// refer to the genes of `stats`. The cells are those with a label below
+/// `stats.n_clusters`, the others having been left out when the statistics were
+/// made.
 ///
 /// # Errors
 /// Returns [`DeError::EmptyInput`] when no cell, gene or group is left.

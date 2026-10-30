@@ -12,29 +12,33 @@
     clippy::many_single_char_names
 )]
 
-//! UMAP (Uniform Manifold Approximation and Projection) — McInnes et al. 2018.
+//! UMAP, Uniform Manifold Approximation and Projection (McInnes, Healy and
+//! Melville 2018).
 //!
-//! Projects high-dimensional data to 2D for visualization. Operates on the kNN
-//! graph we already compute (exact or NN-Descent).
+//! Lays the cells out in two dimensions from the k-nearest-neighbor graph, exact
+//! or from NN-Descent. There are three stages:
 //!
-//! Algorithm:
-//! 1. **Fuzzy simplicial set**: binary-search sigma per point so the
-//!    k-neighborhood has fixed fuzzy mass. Symmetrize via fuzzy union — built
-//!    as a symmetric CSR (transpose by counting sort, row-wise merge), no
-//!    hash map, and built exactly once for both the init and the SGD.
-//! 2. **Initialization**: spectral (2nd/3rd eigenvectors of the normalized
-//!    graph Laplacian, subspace iteration with early stop) or random.
-//! 3. **SGD**: cross-entropy loss. Attractive on graph edges, repulsive on
-//!    negative samples. Weight is encoded in the edge sampling schedule —
-//!    the gradient itself is unweighted (matching umap-learn exactly).
-//!    Runs Hogwild-parallel over edge chunks (umap-learn's `parallel=True`
-//!    model): shared embedding in atomic f32 storage, benign races, per-chunk
-//!    RNG streams — thread-count independent but not run-to-run identical.
-//!    `deterministic = true` selects the sequential loop, bit-reproducible.
+//! 1. **The fuzzy graph.** For each cell, a width `σ` is found by binary search
+//!    so that its neighbors carry a fixed total weight. The directed weights
+//!    are then made symmetric by their fuzzy union. The graph is built once, as
+//!    a symmetric sparse matrix, and shared by the next two stages.
+//! 2. **The starting layout.** Spectral (the second and third eigenvectors of
+//!    the graph's normalized Laplacian, by subspace iteration that stops early),
+//!    multilevel ([`multilevel_layout`]) or random.
+//! 3. **The optimization.** Stochastic gradient descent on UMAP's cross-entropy:
+//!    cells joined by an edge attract, and cells drawn as negative samples
+//!    repel. An edge's weight sets how often it is sampled, and the gradient
+//!    itself is unweighted, exactly as in umap-learn.
 //!
-//! The fuzzy simplicial set, the curve parameters and the layout
-//! optimisation follow umap-learn (BSD-3-Clause, Copyright (c) 2017 Leland
-//! McInnes), whose notice `THIRD_PARTY_NOTICES.md` keeps.
+//! The optimization runs in parallel over chunks of edges, as umap-learn's
+//! `parallel=True` does. Threads update a shared layout without locks, so the
+//! result does not depend on the number of threads but differs slightly from
+//! run to run. `deterministic = true` runs it on one thread, giving the same
+//! layout every time.
+//!
+//! The fuzzy graph, the curve parameters and the optimization follow umap-learn
+//! (BSD-3-Clause, Copyright (c) 2017 Leland McInnes), whose notice
+//! `THIRD_PARTY_NOTICES.md` keeps.
 
 use crate::backend::NeighborGraph;
 use rand::{RngExt, SeedableRng};
@@ -109,7 +113,7 @@ pub(crate) struct FuzzyGraph {
     pub(crate) weights: Vec<f32>,
 }
 
-/// The symmetrised fuzzy-simplicial-set connectivities of a kNN distance
+/// The symmetrized fuzzy-simplicial-set connectivities of a kNN distance
 /// graph, scanpy's `obsp['connectivities']` analogue: a symmetric CSR with
 /// both directions stored, rows sorted by column, no self-loops. Clustering
 /// (Leiden / fast community / igraph comparisons) runs on this graph so
@@ -121,7 +125,7 @@ pub fn fuzzy_connectivities(graph: &NeighborGraph) -> (Vec<u32>, Vec<u32>, Vec<f
 
 /// [`fuzzy_connectivities`] from borrowed CSR arrays, so a caller holding
 /// the distance graph elsewhere (a NumPy array) need not copy it. Builds only
-/// the CSR, not the edge list UMAP's optimiser needs.
+/// the CSR, not the edge list UMAP's optimizer needs.
 #[must_use]
 pub fn fuzzy_connectivities_from(
     indptr: &[u32],
@@ -187,7 +191,7 @@ pub fn umap_into(
 /// [`umap_into`] on the fuzzy connectivities themselves (a symmetric CSR with
 /// both directions stored, rows sorted by column, as `pp.neighbors` stores
 /// them and [`fuzzy_connectivities_from`] builds them), so the graph the
-/// neighbour step already wrote is used as it is: nothing is rebuilt, and no
+/// neighbor step already wrote is used as it is: nothing is rebuilt, and no
 /// copy of it is made. The result equals [`umap_into`] on the distances the
 /// connectivities came from.
 ///
@@ -269,7 +273,7 @@ fn optimize(
 
 // ── fuzzy simplicial set ──────────────────────────────────────────────────
 
-/// Build the symmetrised fuzzy simplicial set from a kNN distance graph.
+/// Build the symmetrized fuzzy simplicial set from a kNN distance graph.
 ///
 /// Membership strengths per directed edge come from [`smooth_knn_dist`]
 /// (parallel over nodes). Symmetrisation is a counting-sort transpose plus a
@@ -302,7 +306,7 @@ fn split_rows_mut<'s, T>(
     blocks
 }
 
-/// Rows per parallel block when writing the symmetrised graph.
+/// Rows per parallel block when writing the symmetrized graph.
 const FUZZY_BLOCK_ROWS: usize = 4_096;
 
 /// Reusable buffers of [`merge_fuzzy_row`], one set per worker thread.
@@ -315,7 +319,7 @@ struct MergeScratch {
 
 /// The first two phases of the fuzzy simplicial set of a kNN distance graph
 /// (given as CSR slices): each edge's membership strength, and the transpose
-/// of the strengths. The symmetrised graph is then merged row by row twice,
+/// of the strengths. The symmetrized graph is then merged row by row twice,
 /// once to count each row ([`FuzzyPlan::row_lens`]) and once to write it into
 /// the caller's arrays ([`FuzzyPlan::fill`]), so the graph, which can be
 /// gigabytes, is never built anywhere but where it is kept (a memory-mapped
@@ -383,7 +387,7 @@ impl<'a> FuzzyPlan<'a> {
         }
     }
 
-    /// Merge row `i` of the symmetrised graph into `sc.out`.
+    /// Merge row `i` of the symmetrized graph into `sc.out`.
     fn merge(&self, i: usize, sc: &mut MergeScratch) {
         merge_fuzzy_row(
             self.g_indptr,
@@ -397,7 +401,7 @@ impl<'a> FuzzyPlan<'a> {
         );
     }
 
-    /// The number of entries in each row of the symmetrised graph (pruned
+    /// The number of entries in each row of the symmetrized graph (pruned
     /// weights excluded): `n` counts, whose running sum is the row pointers.
     #[must_use]
     pub fn row_lens(&self) -> Vec<u32> {
@@ -410,13 +414,13 @@ impl<'a> FuzzyPlan<'a> {
             .collect()
     }
 
-    /// Write the symmetrised graph into `indices_out` and `weights_out`, laid
-    /// out by `indptr` (the running sum of [`FuzzyPlan::row_lens`]); rows are
-    /// written in parallel into their own ranges.
+    /// Write the symmetric graph into `indices_out` and `weights_out`, laid out by
+    /// `indptr` (the running sum of [`FuzzyPlan::row_lens`]). Rows are written in
+    /// parallel, each into its own range.
     ///
     /// # Panics
-    /// Panics if `indptr` is not `n + 1` long or the arrays are not
-    /// `indptr[n]` long.
+    /// Panics if `indptr` is not `n + 1` long or the arrays are not `indptr[n]`
+    /// long.
     pub fn fill(&self, indptr: &[u32], indices_out: &mut [u32], weights_out: &mut [f32]) {
         self.fill_by(indptr, indices_out, weights_out, FUZZY_BLOCK_ROWS);
     }
@@ -528,16 +532,16 @@ fn merge_fuzzy_row(
     }
 }
 
-/// Membership strengths of one point's neighbours: umap-learn's
+/// Membership strengths of one point's neighbors: umap-learn's
 /// `smooth_knn_dist` + `compute_membership_strengths`, which scanpy's
 /// `obsp['connectivities']` come from.
 ///
-/// `dists` are the distances to the point's neighbours in ascending order,
+/// `dists` are the distances to the point's neighbors in ascending order,
 /// self excluded (scanpy's `n_neighbors` counts the point itself, so
 /// `k = dists.len() + 1`). With `rho` the nearest non-zero distance, the
 /// bandwidth `sigma` solves `sum_j exp(-max(0, d_j - rho) / sigma) = log2(k)`
 /// by umap-learn's bisection (64 steps, tolerance 1e-5), floored at 1e-3 of
-/// the mean neighbour distance (umap-learn's `MIN_K_DIST_SCALE`, a mean that
+/// the mean neighbor distance (umap-learn's `MIN_K_DIST_SCALE`, a mean that
 /// includes the self distance of zero).
 ///
 /// Until 2026-09-20 this searched in the wrong direction (a sum below the
@@ -924,19 +928,19 @@ pub fn spectral_layout(
     spectral_init(indptr, indices, weights, n, 2, seed)
 }
 
-/// k-means of the cells' coordinates (`data`, n x d, typically principal
+/// k-means of the cells' coordinates (`data`, `n × d`, usually principal
 /// components) into `k` groups, as Scarf's UMAP start uses it (Dhapola et al.
-/// 2022; Scarf is BSD-3-Clause, see THIRD_PARTY_NOTICES.md; `_get_ini_embed` in
-/// `scarf/datastore/graph_datastore.py`). Returns each cell's group and the
-/// centroids (k x d, row-major).
+/// 2022, `_get_ini_embed` in `scarf/datastore/graph_datastore.py`). Scarf is
+/// BSD-3-Clause (see `THIRD_PARTY_NOTICES.md`).
 ///
-/// The centroids are found on a sample of at most `SAMPLE` cells (k-means++
-/// seeding, then Lloyd iterations), as Scarf's mini-batch k-means does, and every
-/// cell is then assigned to its nearest centroid, in parallel. Deterministic for a
-/// given seed and any thread count.
+/// Returns each cell's group and the centroids (`k × d`, row-major). The
+/// centroids are found on a sample of at most `SAMPLE` cells, by k-means++
+/// seeding and then Lloyd iterations, as Scarf's mini-batch k-means does. Every
+/// cell is then assigned to its nearest centroid, in parallel. The result is the
+/// same for a given seed at any number of threads.
 ///
 /// # Panics
-/// Panics if `data` is not `n x d`.
+/// Panics if `data` is not `n × d`.
 #[must_use]
 #[allow(clippy::too_many_lines)]
 pub fn kmeans_labels(
@@ -1055,13 +1059,17 @@ pub fn kmeans_labels(
     (labels, centroids)
 }
 
-/// Scarf's UMAP start from cell coordinates; see [`kmeans_labels`] for the
-/// clustering. The centroids are laid out by their own PCA, each axis clipped
-/// to the 10th-90th percentiles of a normal centred on its median (Scarf's
-/// `rescale_array`), and every cell is placed at its centroid. Returns n x 2.
+/// Scarf's UMAP start from cell coordinates (see [`kmeans_labels`] for the
+/// grouping).
+///
+/// The centroids are laid out by their own PCA, each axis clipped to the 10th
+/// to 90th percentiles of a normal distribution centered on its median, as
+/// Scarf's `rescale_array` does, and every cell is placed at its centroid.
+/// Returns `n × 2`.
 ///
 /// # Panics
-/// Panics if `data` is not `n x d`, or if the centroids' eigendecomposition fails.
+/// Panics if `data` is not `n × d`, or if the centroids' eigendecomposition
+/// fails.
 #[must_use]
 pub fn kmeans_start(data: &[f32], n: usize, d: usize, k: usize, seed: u64) -> Vec<f32> {
     if n == 0 {
@@ -1122,27 +1130,35 @@ pub fn kmeans_start(data: &[f32], n: usize, d: usize, k: usize, seed: u64) -> Ve
     out
 }
 
-/// Multilevel spectral start (Polariseq's own): the spectral layout of a graph
-/// of millions of cells computed through a graph of their groups.
+/// The multilevel spectral start: the spectral layout of a graph of millions of
+/// cells, computed through a graph of their groups.
 ///
-/// 1. The fuzzy graph's weights are summed between the `k` groups given by
-///    `labels` (k-means groups or clusters): a k x k graph.
-/// 2. Its normalized adjacency `D^-1/2 W D^-1/2` is decomposed exactly; the two
-///    leading non-trivial eigenvectors, mapped to random-walk form, give each
-///    group a position.
+/// 1. The fuzzy graph's weights are summed between the `k` groups in `labels`
+///    (k-means groups or clusters), giving a `k × k` graph `W`.
+/// 2. Its normalized adjacency is decomposed exactly, and its two leading
+///    non-trivial eigenvectors, mapped to random-walk form, give each group a
+///    position.
 /// 3. Every cell takes its group's position, scaled by the square root of its
-///    own degree (the change of variables between the two forms), which is a
-///    start for the cell graph's own eigenvectors, and `smooth` iterations of
-///    `(I + S) / 2` on the cell graph refine it (the shift keeps every
-///    eigenvalue non-negative, so no spurious negative mode is amplified).
+///    own degree, which converts between the two forms. This is a starting
+///    point for the eigenvectors of the cell graph itself, refined by `smooth`
+///    steps of `(I + S) / 2` on that graph.
 ///
-/// Subspace iteration on the cell graph from a random start (`spectral_init`)
-/// needs many iterations because its leading eigenvalues nearly coincide; from
-/// the coarse solution, which already has the right large-scale shape, a few
-/// suffice. Returns n x 2, each axis scaled to [-10, 10] as `spectral_init`.
+/// ```text
+/// normalized adjacency:   S = D^(-1/2) W D^(-1/2)
+/// refinement step:        x ← (I + S) x / 2
+/// ```
+///
+/// Here `D` holds the degrees. The shift by `I` keeps every eigenvalue of the
+/// step non-negative, so no negative mode is amplified.
+///
+/// From a random start, subspace iteration on the cell graph
+/// (`spectral_init`) needs many iterations, because its leading eigenvalues
+/// nearly coincide. From the coarse solution, which already has the right
+/// large-scale shape, a few steps are enough. Returns `n × 2`, each axis scaled
+/// to `[-10, 10]` as in `spectral_init`.
 ///
 /// # Panics
-/// Panics if `labels` does not hold one group in `0..k` per cell.
+/// Panics if `labels` does not hold one group in `0..k` for each cell.
 #[must_use]
 #[allow(clippy::too_many_lines)]
 pub fn multilevel_layout(
@@ -1870,7 +1886,7 @@ mod tests {
         }
     }
 
-    /// The pre-phase-3 reference implementation: HashMap symmetrisation.
+    /// The pre-phase-3 reference implementation: HashMap symmetrization.
     /// Kept as the accuracy oracle for the CSR construction.
     fn fuzzy_simplicial_set_hashmap(graph: &NeighborGraph) -> Vec<(u32, u32, f32)> {
         let n = graph.n_obs;
@@ -2244,7 +2260,7 @@ mod tests {
 
     /// Values from umap-learn 0.5.12's `smooth_knn_dist` +
     /// `compute_membership_strengths` on the row [0, 0.5, 1, 2, 4] (self
-    /// first). All-ones weights, the pre-2026-09-20 behaviour, fail this.
+    /// first). All-ones weights, the pre-2026-09-20 behavior, fail this.
     const UMAP_LEARN_REFERENCE: [f32; 4] = [1.0, 0.754_181, 0.428_969_95, 0.138_780_77];
 
     #[test]

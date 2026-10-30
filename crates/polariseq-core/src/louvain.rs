@@ -15,8 +15,8 @@ use crate::leiden;
 pub struct FastCommunityOptions {
     /// Resolution parameter γ. Higher → more, smaller communities.
     pub resolution: f64,
-    /// Cap on aggregation levels (the old per-pass cap; local moving now
-    /// converges on its own via the node queue).
+    /// The most aggregation levels in one run. Local moving converges on its own
+    /// well before this limit.
     pub max_iterations: usize,
     /// Stop after a level that moved fewer than this fraction of nodes.
     pub convergence_threshold: f64,
@@ -164,7 +164,7 @@ mod tests {
         assert_eq!(result.labels[1], c0);
         assert_eq!(result.labels[2], c0);
         assert_ne!(result.labels[3], c0);
-        // Exact for this fixture: node 2's two nearest neighbours sit at ρ and
+        // Exact for this fixture: node 2's two nearest neighbors sit at ρ and
         // already reach umap-learn's target log2(4) = 2, so σ falls to its
         // floor and the long bridge's weight to ~0 (pruned): two triangles,
         // m = 6, Q = 1 − 2·(1/2)² = 0.5. (Before the 2026-09-20 fix, σ

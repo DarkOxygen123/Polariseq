@@ -1,18 +1,16 @@
-//! Spill-to-SSD and the disk-backed preprocessing pipeline.
+//! Copying a matrix to disk, and the preprocessing of a matrix too large for
+//! memory.
 //!
-//! This is the path for a matrix that does not fit in RAM. Two rules make
-//! it honest:
+//! Two properties make this work:
 //!
-//! 1. **Nothing is ever fully materialised.** [`spill_h5ad`] streams row
-//!    blocks out of the file and appends them to three flat files as it
-//!    goes; peak memory is one block, not one matrix. (The function it
-//!    replaces read the whole matrix, then built a second complete copy as
-//!    a `Vec<u8>` before writing a byte of it.)
-//! 2. **The kernels are the same ones the in-memory path uses.** Once
-//!    spilled, the matrix is a `DiskBackedCSR`, which is a
-//!    [`RowBlocks`](polariseq_core::rowblocks::RowBlocks) source, so QC,
-//!    gene statistics, HVG and PCA run through the identical code and
-//!    produce identical numbers.
+//! 1. **The matrix is never held whole.** [`spill_h5ad`] reads the file in
+//!    blocks of rows and appends each block to three flat files, so its peak
+//!    memory is one block.
+//! 2. **The computations are those of the in-memory path.** The copy on disk
+//!    is a `DiskBackedCSR`, which is a
+//!    [`RowBlocks`] source, so quality
+//!    control, gene statistics, gene selection and PCA run through the same
+//!    code and give the same numbers.
 
 use std::path::{Path, PathBuf};
 
@@ -39,7 +37,8 @@ const DEFAULT_SPILL_ROWS: usize = 32_768;
 /// Where a spilled matrix lives and how big it is.
 #[derive(Debug, Clone)]
 pub struct Spilled {
-    /// File prefix; the triple is `{prefix}.data/.indices/.indptr`.
+    /// The file prefix: the three files are `{prefix}.data`, `{prefix}.indices`
+    /// and `{prefix}.indptr`.
     pub prefix: PathBuf,
     /// Rows (cells).
     pub n_rows: usize,
@@ -167,11 +166,10 @@ pub struct DiskPipelineOptions {
     pub n_hvg: usize,
     /// Principal components.
     pub n_pcs: usize,
-    /// Minimum detected genes for a cell to be kept (scanpy's
-    /// `filter_cells(min_genes=...)`; 0 keeps every cell). Without this the
-    /// out-of-core path answers a different question than the in-RAM
-    /// pipeline on the same parameters — the telemetry harness caught it
-    /// comparing the two arms' outputs.
+    /// The fewest detected genes a cell may have to be kept, as Scanpy's
+    /// `filter_cells(min_genes=...)` (0 keeps every cell). It makes the
+    /// out-of-core analysis keep the same cells as the in-memory one with the same
+    /// settings.
     pub min_genes: u32,
     /// Maximum detected genes for a cell to be kept (`u32::MAX`: no limit).
     pub max_genes: u32,
@@ -179,17 +177,18 @@ pub struct DiskPipelineOptions {
     pub min_counts: f32,
     /// Maximum total counts for a cell to be kept (infinite: no limit).
     pub max_counts: f32,
-    /// Maximum percentage of a cell's counts from mitochondrial genes
-    /// (infinite: no limit; a finite value needs `mito`).
+    /// The largest share of a cell's counts from mitochondrial genes, in percent.
+    /// Infinity sets no limit, and a finite value needs `mito`.
     pub max_pct_mt: f32,
     /// Which genes are mitochondrial, one flag per gene (`None`: no such
     /// genes, so no percentage is computed).
     pub mito: Option<Vec<bool>>,
-    /// Minimum number of kept cells in which a gene is detected for it to be
-    /// kept (scanpy's `filter_genes(min_cells=...)`, counted after the cell
-    /// filter as scanpy counts it; 0 keeps every gene).
+    /// The fewest kept cells a gene must be detected in to be kept, as Scanpy's
+    /// `filter_genes(min_cells=...)`, counted after the cell filter as Scanpy
+    /// counts it (0 keeps every gene).
     pub min_cells: u32,
-    /// Random seed (unused on the exact Gram path; kept for the wide path).
+    /// Random seed of the randomized PCA, used when too many genes are kept for the
+    /// exact method.
     pub seed: u64,
     /// Directory for the spill files.
     pub spill_dir: PathBuf,
@@ -201,9 +200,9 @@ pub struct DiskPipelineOptions {
     /// kept cells (0: every gene, Scanpy's seurat ranking). Polariseq's
     /// workflow uses 0.01.
     pub hvg_floor_frac: f32,
-    /// After the genes are selected, normalize each cell again over them to
-    /// this total (then log), as Scarf does; `None` keeps the totals over all
-    /// genes.
+    /// After gene selection, normalize each cell again over the selected genes to
+    /// this total, then take the logarithm, as Scarf does. `None` keeps the totals
+    /// over all genes.
     pub renormalize: Option<f32>,
     /// Standardize each gene before PCA (scanpy's `pp.scale`, never formed).
     pub scale_pcs: bool,
@@ -246,9 +245,9 @@ pub struct DiskPipelineResult {
     pub variance_ratio: Vec<f32>,
     /// Components actually returned.
     pub n_components: usize,
-    /// QC metrics from the raw counts. `n_counts`/`n_genes` cover the rows
-    /// of `embedding` (the kept cells); the per-gene fields cover all input
-    /// genes, as scanpy computes them before filtering.
+    /// Quality metrics from the raw counts. `n_counts` and `n_genes` cover the
+    /// rows of `embedding`, the kept cells. The per-gene fields cover all the input
+    /// genes, as Scanpy computes them before filtering.
     pub qc: QcMetrics,
     /// HVG selection (mask over the original genes).
     pub hvg: HvgResult,
@@ -268,7 +267,7 @@ pub struct DiskPipelineResult {
     /// (`None` when no mitochondrial mask was given).
     pub pct_counts_mt: Option<Vec<f32>>,
     /// Which genes passed `min_cells`, one flag per gene of the input. The
-    /// removed genes take no part in normalisation, gene selection or PCA.
+    /// removed genes take no part in normalization, gene selection or PCA.
     pub gene_keep: Vec<bool>,
     /// Genes in the original matrix.
     pub n_cols: usize,
@@ -276,20 +275,20 @@ pub struct DiskPipelineResult {
     pub nnz: usize,
 }
 
-/// The full preprocessing pipeline on a matrix too large for RAM:
-/// spill → QC → `normalize_total` → `log1p` → HVG → PCA.
+/// The whole preprocessing of a matrix too large for memory: copy to disk,
+/// quality control, `normalize_total`, `log1p`, gene selection and PCA.
 ///
-/// Every step reads or rewrites the memory-mapped spill; the only things
-/// held in RAM are per-gene vectors (`n_cols`) and the final embedding
-/// (`n_rows × n_pcs`). Normalisation and `log1p` are applied **in place** on
-/// the mapped values, and the HVG subset is written to a second, much
-/// smaller spill (2 000 of ~30 000 genes) which PCA then reads.
+/// Every step reads or rewrites the memory-mapped copy on disk. Only per-gene
+/// vectors (`n_cols` values) and the final embedding (`n_rows × n_pcs`) are
+/// held in memory. Normalization and `log1p` are applied in place on the
+/// mapped values, and the selected genes are written to a second, much smaller
+/// copy (2,000 of about 30,000 genes), which PCA then reads.
 ///
-/// The result matches what the in-memory pipeline produces on the same
-/// file, because it is the same code on a different block source.
+/// The result matches what the in-memory analysis gives on the same file,
+/// because it is the same code on a different source of blocks.
 ///
 /// # Errors
-/// Returns [`IoError`] on read/write failure, or if PCA fails.
+/// Returns [`IoError`] when reading or writing fails, or when PCA fails.
 #[allow(clippy::too_many_lines)] // one pass per pipeline step, in order
 pub fn disk_backed_preprocess(
     path: &str,
@@ -313,7 +312,7 @@ pub fn disk_backed_preprocess(
         };
     }
 
-    // 1. Spill the raw counts (streaming; never materialised).
+    // 1. Spill the raw counts (streaming; never materialized).
     let spilled = spill_h5ad_with(path, &raw_prefix, opts.block_rows)?;
     phase!("spill_h5ad");
     // The raw spill is this call's scratch: delete it when `db` goes out of
@@ -348,7 +347,7 @@ pub fn disk_backed_preprocess(
 
     // 2b. filter_cells: decide which rows survive, then filter everything
     //     downstream, with the thresholds and comparisons of the in-memory
-    //     `filter_cells`. Row totals are row-local, so normalising before or
+    //     `filter_cells`. Row totals are row-local, so normalizing before or
     //     after the filter is identical for the kept rows — only the gene
     //     statistics and PCA must see the filtered stream, which
     //     `FilteredRows` provides without rewriting the spill.
@@ -399,7 +398,7 @@ pub fn disk_backed_preprocess(
         None
     };
 
-    // The normalisation scale. Without a gene filter the QC totals are the
+    // The normalization scale. Without a gene filter the QC totals are the
     // row totals; with one, each row is totalled over the kept genes, as
     // `normalize_total` would total the gene-filtered matrix.
     let scale = match &gene_keep {
@@ -442,8 +441,8 @@ pub fn disk_backed_preprocess(
     let view = NormalizedView::new(&db, scale.clone(), true);
     let normalized = FilteredRows::new(&view, &keep);
 
-    // 4. HVG on the log-normalised values (Seurat flavour: statistics of
-    //    expm1(x), i.e. of the normalised counts).
+    // 4. HVG on the log-normalized values (Seurat flavour: statistics of
+    //    expm1(x), i.e. of the normalized counts).
     //    With a gene filter, selection runs on the kept genes alone (their
     //    mean bins depend on which genes are present) and maps back.
     let hvg = if opts.hvg_floor_frac > 0.0 {
@@ -474,7 +473,7 @@ pub fn disk_backed_preprocess(
     }
 
     // 5. Subset to the HVGs — a second, much smaller spill of the *raw*
-    //    counts — then PCA through the same view. Normalisation uses the
+    //    counts — then PCA through the same view. Normalization uses the
     //    full-gene row totals, as scanpy does (normalize precedes HVG
     //    selection), so the scale factors carry over unchanged.
     let sub = db

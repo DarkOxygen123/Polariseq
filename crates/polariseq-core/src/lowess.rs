@@ -1,13 +1,15 @@
-//! LOWESS (locally weighted scatterplot smoothing; Cleveland 1979), as
+//! LOWESS, locally weighted scatterplot smoothing (Cleveland 1979), as
 //! `statsmodels.nonparametric.smoothers_lowess.lowess` computes it with
-//! `delta = 0`: for each point a weighted straight-line fit over its `k`
-//! nearest neighbours in `x` (tricube weights scaled to the farthest of
-//! them), followed by `it` robustifying passes that down-weight points with
-//! large residuals (bisquare weights of the residual over six times the
-//! median absolute residual).
+//! `delta = 0`.
 //!
-//! Used by [`crate::preprocess::hvg_scarf`] on a few hundred points (one per
-//! mean-expression bin), so it is written for clarity, not for scale.
+//! For each point, a straight line is fitted over its `k` nearest neighbors in
+//! `x`, with tricube weights scaled to the farthest of them. Then `it`
+//! robustifying passes down-weight the points with large residuals, with
+//! bisquare weights of each residual over six times the median absolute
+//! residual.
+//!
+//! [`crate::preprocess::hvg_scarf`] uses it on a few hundred points, one per bin
+//! of mean expression, so it is written for clarity over speed.
 
 #![allow(clippy::cast_precision_loss, clippy::many_single_char_names)]
 

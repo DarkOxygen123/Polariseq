@@ -1,7 +1,7 @@
-//! Trajectory analysis: pseudotime, diffusion maps, and PAGA.
+//! Trajectories: pseudotime, diffusion maps and a graph between clusters.
 //!
-//! These methods reveal developmental progressions and lineage relationships
-//! from single-cell data. All operate on the kNN graph we already compute.
+//! These follow developmental progressions and the relations between cell
+//! populations. All of them work on the k-nearest-neighbor graph.
 
 // Graph code reads naturally with (i, j, k, s, e, w) — the textbook names.
 #![allow(clippy::many_single_char_names)]
@@ -38,13 +38,17 @@ pub struct PseudotimeResult {
     pub n_reachable: usize,
 }
 
-/// Compute diffusion pseudotime via Dijkstra shortest path from a root cell.
+/// Pseudotime from a root cell: each cell's shortest-path distance from it
+/// (Dijkstra), over the k-nearest-neighbor graph made symmetric, with its
+/// distances as edge lengths.
 ///
-/// Uses the symmetrized kNN graph with edge weights = distances. Cells closer
-/// to the root have smaller pseudotime values.
+/// The distances are divided by the largest, so the root is at 0 and the
+/// farthest reachable cell at 1. Unreachable cells get `f32::INFINITY`. This is
+/// a graph distance, and diffusion pseudotime (Haghverdi et al. 2016) is a
+/// different measure.
 ///
 /// # Errors
-/// Returns [`TrajectoryError`] on invalid input.
+/// Returns [`TrajectoryError`] for invalid input.
 pub fn pseudotime(graph: &NeighborGraph, root: usize) -> Result<PseudotimeResult, TrajectoryError> {
     let n = graph.n_obs;
     if n == 0 {
@@ -124,13 +128,15 @@ pub struct PagaResult {
     pub cluster_sizes: Vec<usize>,
 }
 
-/// Compute PAGA connectivities: cluster-level graph from the kNN graph.
+/// A graph between clusters. For two clusters, the connectivity is the number of
+/// k-nearest-neighbor edges between them, counted in both directions, divided
+/// by the number of cells in the two. The diagonal is 1.
 ///
-/// For each pair of clusters, connectivity = fraction of kNN edges connecting
-/// them, normalized by the total possible edges. Higher = more connected.
+/// PAGA (Wolf et al. 2019) measures it differently, comparing those edges with
+/// the number expected by chance.
 ///
 /// # Errors
-/// Returns [`TrajectoryError`] on invalid input.
+/// Returns [`TrajectoryError`] for invalid input.
 pub fn paga(
     graph: &NeighborGraph,
     labels: &[u32],

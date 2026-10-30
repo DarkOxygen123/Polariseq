@@ -13,8 +13,8 @@
 //!   HVG sets agree with the reference implementation.
 //!
 //! Scanpy is BSD-3-Clause (Copyright (c) 2025 scverse, Copyright (c) 2017
-//! F. Alexander Wolf, P. Angerer, Theis Lab); `THIRD_PARTY_NOTICES.md` keeps
-//! its notice.
+//! F. Alexander Wolf, P. Angerer, Theis Lab), and `THIRD_PARTY_NOTICES.md`
+//! keeps its notice.
 
 #![allow(
     clippy::cast_precision_loss,
@@ -47,17 +47,17 @@ pub struct QcMetrics {
 /// `(block_idx, n_counts, n_genes, mt_counts)` for one block of rows.
 type CellBlock = (usize, Vec<f32>, Vec<u32>, Vec<f32>);
 
-/// Compute QC metrics in one parallel pass over the matrix (blocks of
-/// [`ROW_BLOCK`] rows via [`RowBlocks`]). Gene accumulators fold in block
-/// order — for count data (integers in `f64`) the result is exactly the
-/// same as any other summation order; cell outputs are per-row and exact.
+/// Quality control metrics of every cell and gene, in one parallel pass over
+/// the matrix, in blocks of [`ROW_BLOCK`] rows.
 ///
-/// `mito` is an optional per-gene mask of mitochondrial genes. A value counts
-/// as "expressed" when it is `> 0`, matching scanpy's `X > 0`.
+/// `mito` is an optional mask of the mitochondrial genes. A value counts as
+/// detected when it is above zero, as Scanpy's `X > 0`. The per-gene totals are
+/// added up in block order. For counts, which are whole numbers, the result is
+/// exact in any order.
 ///
 /// # Panics
 /// Panics if a gene index in the matrix exceeds `mito.len()` when `mito` is
-/// provided (cannot happen for a mask built from `var_names`).
+/// given, which cannot happen for a mask built from the gene names.
 #[must_use]
 pub fn qc_metrics(m: &CsrMatrix, mito: Option<&[bool]>) -> QcMetrics {
     qc_metrics_blocks(m, mito)
@@ -154,7 +154,7 @@ pub fn qc_metrics_blocks(src: &dyn RowBlocks, mito: Option<&[bool]>) -> QcMetric
 /// `keep_cols` is `None`), summed in `f32` in stored order.
 ///
 /// This is exactly what [`CsrMatrix::row_sums`] returns for the matrix with
-/// the other columns removed, so a normalisation scale taken from these
+/// the other columns removed, so a normalization scale taken from these
 /// totals equals `normalize_total` on a gene-filtered matrix, without
 /// writing that matrix anywhere. Each row is summed by one thread, so the
 /// result does not depend on the source or the thread count.
@@ -221,14 +221,20 @@ pub fn normalize_total_inplace(m: &mut CsrMatrix, target_sum: f32) -> Vec<f32> {
     totals
 }
 
-/// Normalize each cell again over the genes the matrix now holds (Scarf's
-/// normalization after gene selection), in place, from values that were
-/// normalized over all genes: each value is turned back into a count,
-/// `x = expm1(v) * back[i]` (or `v * back[i]` without `from_log`), with
-/// `back[i]` = the cell's original total / the original target; then each cell
-/// is scaled to `target_sum` over its remaining values and, with `log`,
-/// log-transformed. No copy of the counts is needed. Cells whose remaining
-/// total is zero are left at zero.
+/// Normalize each cell again over the genes the matrix now holds, in place:
+/// Scarf's normalization after gene selection.
+///
+/// The values were normalized over all genes, so each is first turned back
+/// into a count:
+///
+/// ```text
+/// x = expm1(v) · back[i]       (v · back[i] without from_log)
+/// back[i] = the cell's original total / the original target sum
+/// ```
+///
+/// Each cell is then scaled to `target_sum` over its remaining values and,
+/// with `log`, log-transformed. No copy of the counts is needed. A cell whose
+/// remaining total is zero is left at zero.
 ///
 /// # Panics
 /// Panics if `back.len() != nrows`.
@@ -356,20 +362,20 @@ pub fn gene_mean_var_blocks(src: &dyn RowBlocks, expm1: bool) -> GeneStats {
     }
 }
 
-/// A [`RowBlocks`] source that applies `normalize_total` (+ optional `log1p`)
-/// to each block **as it is read**, without materialising the result.
+/// A [`RowBlocks`] source that applies `normalize_total`, and optionally
+/// `log1p`, to each block as it is read, without storing the result.
 ///
-/// The out-of-core path used to normalise by mutating the memory-mapped
-/// spill in place. That dirties every page of the matrix, so the whole thing
-/// becomes resident and the "streaming" pass holds as much memory as an
-/// in-memory one — measured on heart_100k: 1.14 GB of private memory for an
-/// 892 MB matrix, unchanged by the block size. Transforming on the fly keeps
-/// the backing pages clean (so the OS can evict them), removes a full
-/// rewrite of the file, and is the only option once values are stored
-/// narrowed (a `u8` count cannot hold a normalised float).
+/// Rewriting the memory-mapped copy on disk in place would touch every page of
+/// the matrix, so the whole matrix would end up in memory. Transforming each
+/// block as it is read keeps the stored pages unchanged, so the operating system
+/// can release them, saves rewriting the file, and works when the values are
+/// stored in a narrow type (a `u8` count cannot hold a normalized value).
 ///
-/// Values are `x · scale[row]`, then `ln(1+x)` if `log1p` is set — the same
-/// arithmetic, in the same order, as
+/// ```text
+/// x' = x · scale[row]          then, with log1p:  x'' = ln(1 + x')
+/// ```
+///
+/// This is the same arithmetic, in the same order, as
 /// [`normalize_total_inplace`] followed by [`log1p_inplace`].
 pub struct NormalizedView<'a> {
     inner: &'a dyn RowBlocks,
@@ -450,21 +456,16 @@ impl RowBlocks for NormalizedView<'_> {
     }
 }
 
-/// A [`RowBlocks`] source that drops the rows whose flag is false.
+/// A [`RowBlocks`] source that leaves out the rows whose flag is `false`.
 ///
-/// This is scanpy's `filter_cells` for the out-of-core path: QC decides
-/// which rows survive, and everything downstream (per-gene statistics, PCA)
-/// must run on the survivors only — without rewriting the spill. Wrapping
-/// the source does that: downstream kernels receive compacted blocks whose
-/// offsets count *kept* rows, so they compute exactly what they would on a
-/// pre-filtered matrix. The disk-backed pipeline without this kept every
-/// cell and so answered a different question than the in-RAM pipeline on
-/// the same parameters (found by the telemetry harness comparing the two
-/// arms' outputs; chapter 09).
+/// This is how cells are filtered out of core. The counts on disk stay as they
+/// are, and the steps that follow (per-gene statistics, PCA) receive blocks
+/// holding only the kept rows, so they compute exactly what they would on a
+/// filtered matrix.
 ///
-/// Compose it *outside* [`NormalizedView`], not inside: the scale vector is
-/// indexed by original row, so the normaliser must see original offsets
-/// while this adapter emits compacted ones.
+/// Wrap it around a [`NormalizedView`], never the other way round: the
+/// normalization's scale is indexed by the original rows, so it must see the
+/// original row offsets, while this source gives the kept rows' offsets.
 pub struct FilteredRows<'a> {
     inner: &'a dyn RowBlocks,
     /// Cumulative kept rows before source row `i` (length `n_rows + 1`).
@@ -668,15 +669,16 @@ impl ClusterStats {
     }
 }
 
-/// Per-cluster gene statistics over any [`RowBlocks`] source, in one pass.
+/// Per-cluster statistics of every gene, in one pass over any [`RowBlocks`]
+/// source.
 ///
-/// This is **the** cluster-statistics kernel: marker ranking, annotation
-/// scoring and per-cluster means all use it, whether the matrix is in RAM,
-/// memory-mapped or streamed from disk. Partials fold in block order, so the
-/// result does not depend on the thread count or the source.
+/// Marker ranking, cell type scoring and per-cluster means all use it, whether
+/// the matrix is in memory or read from disk. Partial results are combined in
+/// block order, so the result does not depend on the number of threads or on
+/// the source.
 ///
-/// `labels` holds one cluster id per row; ids `>= n_clusters` are ignored
-/// (that is how a caller excludes cells).
+/// `labels` holds one cluster id per row. Rows with an id of `n_clusters` or
+/// more are left out, which is how a caller excludes cells.
 ///
 /// # Panics
 /// Panics if `labels.len()` is smaller than the number of rows.
@@ -803,19 +805,27 @@ fn pd_cut_bins(xs: &[f64], n_bins: usize) -> Vec<usize> {
         .collect()
 }
 
-/// Select highly-variable genes exactly as scanpy's
-/// `highly_variable_genes(flavor="seurat", n_top_genes=...)` does:
+/// Select highly variable genes as Scanpy's
+/// `highly_variable_genes(flavor="seurat", n_top_genes=...)` does, step for
+/// step.
 ///
-/// 1. `mean`, `var` of `expm1(X)` (pass `gene_mean_var(m, true)`).
-/// 2. `dispersion = var / mean`; zero dispersion → `NaN`; take logs.
-/// 3. Bin `log1p(mean)` into `n_bins` equal-width bins (`pd.cut`).
-/// 4. Within each bin z-score the dispersion (`ddof = 1`); a bin with a
-///    single gene gets a normalised dispersion of 1.
-/// 5. Keep the `n_top_genes` genes with the largest normalised dispersion.
+/// `stats` holds each gene's mean and variance of `expm1(X)`, from
+/// `gene_mean_var(m, true)`. For each gene:
 ///
-/// One deliberate difference: scanpy keeps *every* gene tied at the cut-off,
-/// which can return more than `n_top_genes`; we break ties by gene index so
-/// the count is exact.
+/// ```text
+/// dispersion = variance / mean      (NaN when it is zero)
+/// d          = ln(dispersion)
+/// ```
+///
+/// The genes are binned by `ln(1 + mean)` into `n_bins` bins of equal width,
+/// as `pandas.cut` bins them. Within each bin, `d` is standardized with the
+/// bin's mean and standard deviation (`ddof = 1`), and a gene alone in its bin
+/// gets 1. The `n_top_genes` genes with the largest standardized dispersion
+/// are selected.
+///
+/// Scanpy keeps every gene tied at the cut-off, so it can return more than
+/// `n_top_genes`. Here ties are broken by gene index, so exactly
+/// `n_top_genes` genes are selected.
 #[must_use]
 pub fn hvg_seurat(stats: &GeneStats, n_top_genes: usize, n_bins: usize) -> HvgResult {
     let n_genes = stats.means.len();
@@ -876,7 +886,7 @@ pub fn hvg_seurat(stats: &GeneStats, n_top_genes: usize, n_bins: usize) -> HvgRe
         };
     }
 
-    // Step 5: top-n by normalised dispersion, NaN last, ties by gene index.
+    // Step 5: top-n by normalized dispersion, NaN last, ties by gene index.
     let mut order: Vec<usize> = (0..n_genes).collect();
     order.sort_by(|&a, &b| {
         let (da, db) = (dnorm[a], dnorm[b]);
@@ -1040,7 +1050,8 @@ pub struct HvgScarf {
 }
 
 /// Highly variable genes as Scarf's `mark_hvgs` selects them (Dhapola et al.,
-/// Nat. Commun. 2022; Scarf is BSD-3-Clause, see THIRD_PARTY_NOTICES.md):
+/// Nat. Commun. 2022). Scarf is BSD-3-Clause (see `THIRD_PARTY_NOTICES.md`).
+/// The steps:
 ///
 /// 1. Per gene, the mean and variance of library-size-normalized counts
 ///    (pass [`gene_stats_detected_blocks`] on the normalized matrix, with
@@ -1048,15 +1059,16 @@ pub struct HvgScarf {
 ///    not matter: it shifts every log mean and log variance alike, and the
 ///    steps below are unchanged by such a shift.
 /// 2. Genes with a positive mean are binned by log mean into `n_bins` equal
-///    bins (left-closed; the top edge widened by 0.1 so the largest is in).
+///    bins, each including its lower edge, with the top edge widened by 0.1
+///    so the largest gene falls inside.
 /// 3. In each bin the gene with the smallest log variance is taken, and a
 ///    LOWESS curve (`frac`, 100 robust passes) is fitted to these floor genes.
 /// 4. A gene's corrected variance is its variance over the curve's value for
 ///    its bin.
 /// 5. Among genes detected in more than `min_cells` cells, the `n_top_genes`
-///    with the largest corrected variance are kept (ties by gene index, so the
-///    count is exact; Scarf keeps those strictly above the `n_top_genes`-th
-///    value). Scarf's default floor is 1% of the cells.
+///    with the largest corrected variance are kept. Ties are broken by gene
+///    index, so the count is exact, where Scarf keeps the genes strictly above
+///    the `n_top_genes`-th value. Scarf's default floor is 1% of the cells.
 ///
 /// # Panics
 /// Panics if `detected` does not hold one count per gene.
@@ -1458,7 +1470,7 @@ mod tests {
         assert!(qc_metrics(&m, None).mt_counts.is_none());
     }
 
-    /// The streaming view must be arithmetically identical to materialising
+    /// The streaming view must be arithmetically identical to materializing
     /// the transform — that equivalence is the whole reason it is safe to
     /// stop rewriting the matrix.
     #[test]

@@ -1,13 +1,13 @@
 //! Community detection (Leiden clustering) on the neighbor graph.
 //!
-//! Given a kNN neighbor graph (from [`crate::neighbors`]), produce per-cell
+//! Given a kNN neighbor graph (from [`crate::neighbors`](mod@crate::neighbors)), produce per-cell
 //! cluster assignments via the Leiden algorithm (Traag, Waltman & van Eck
 //! 2019), implemented in [`crate::leiden`] on CSR.
 //!
 //! Two graph representations are involved:
 //! - **Distance graph** (`obsp['distances']`): the raw kNN distances.
 //! - **Connectivity graph** (`obsp['connectivities']`): the UMAP fuzzy
-//!   simplicial set — a symmetrised, weighted graph. Leiden runs on this,
+//!   simplicial set — a symmetrized, weighted graph. Leiden runs on this,
 //!   exactly as scanpy's Leiden runs on connectivities.
 //!
 //! Modularity is reported on the same weighted graph igraph receives (see
@@ -20,13 +20,13 @@ use crate::leiden as leiden_engine;
 /// Options for Leiden clustering.
 #[derive(Debug, Clone)]
 pub struct LeidenOptions {
-    /// Resolution parameter γ. Higher → more, smaller clusters; lower → fewer,
-    /// larger clusters. scanpy default: 1.0.
+    /// Resolution `γ`. Higher gives more, smaller clusters, and lower fewer, larger
+    /// ones. Scanpy's default is 1.0.
     pub resolution: f64,
     /// Random seed.
     pub seed: u64,
-    /// Safety cap on aggregation levels per run (Leiden converges long
-    /// before this; kept from the old API).
+    /// The most aggregation levels in one run. Leiden converges well before this
+    /// limit.
     pub max_iterations: usize,
 }
 
@@ -85,11 +85,13 @@ pub fn leiden(
     ))
 }
 
-/// Leiden on a graph already weighted for clustering: a symmetric
-/// connectivity CSR (both directions, rows sorted by column), as
+/// Leiden on a graph already weighted for clustering: the symmetric
+/// connectivity graph (both directions, each row sorted by column) that
 /// `pp.neighbors` stores in `obsp['connectivities']` and Scanpy's
-/// `sc.tl.leiden` clusters. The graph is used as given; [`leiden`] instead
-/// takes kNN *distances* and derives this graph itself.
+/// `sc.tl.leiden` clusters.
+///
+/// The graph is used as given. [`leiden`] instead takes the k-nearest-neighbor
+/// distances and builds this graph itself.
 ///
 /// # Errors
 /// Returns [`ClusteringError::Empty`] if the graph has no nodes.

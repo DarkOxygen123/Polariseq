@@ -1,19 +1,18 @@
-//! Chunk-parallel reads of compressed 1-D HDF5 datasets.
+//! Parallel reads of compressed one-dimensional HDF5 datasets, chunk by chunk.
 //!
-//! The HDF5 library inflates gzip chunks one at a time inside `H5Dread`;
-//! on an 8-core machine that leaves most of the machine idle during
-//! load. This reader enumerates the dataset's chunks
-//! ([`polariseq_hdf5_raw`]), reads their raw compressed bytes sequentially
-//! (pure I/O, in windows so memory stays bounded), then inflates
-//! (zlib — HDF5's deflate is zlib-wrapped) and decodes them in parallel
-//! with rayon, straight into the typed output. Byte-shuffle (anndata
-//! writes it on scanpy-produced files) is undone after inflate; filters
-//! are applied in pipeline order on write, so reversed on read.
+//! The HDF5 library inflates gzip chunks one at a time inside `H5Dread`, which
+//! leaves most cores idle while a file loads. This reader lists the dataset's
+//! chunks ([`polariseq_hdf5_raw`]) and reads their compressed bytes in order, in
+//! windows so that memory stays bounded. It then inflates them (zlib, since
+//! HDF5's deflate is zlib-wrapped) and decodes them in parallel, straight into
+//! the typed output. Byte shuffling, which anndata applies to files written by
+//! Scanpy, is undone after inflating, since filters are applied in pipeline
+//! order on write and so are reversed on read.
 //!
-//! Anything unusual — dataset not chunked/gzipped, dtypes or layouts we do
-//! not recognise, filter pipelines beyond deflate+shuffle, or any inflate
-//! failure — returns `None` and the caller falls back to the library
-//! path. `POLARISEQ_TRACE=1` prints which path ran and how long it took.
+//! Anything unusual returns `None`, and the caller falls back to the HDF5
+//! library: a dataset that is not chunked or not gzipped, a data type or layout
+//! this reader does not know, filters beyond deflate and shuffle, or any failure
+//! to inflate. `POLARISEQ_TRACE=1` prints which path ran and how long it took.
 
 #![allow(clippy::too_many_lines)]
 use flate2::read::ZlibDecoder;

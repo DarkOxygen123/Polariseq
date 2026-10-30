@@ -75,7 +75,8 @@ pub enum Categories {
 /// One column of a dataframe.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Column {
-    /// Codes into `categories`, in the file's integer width; -1 is missing.
+    /// Codes into `categories`, in the file's integer width. A code of -1 is
+    /// missing.
     Categorical {
         /// One code per row.
         codes: Numbers,
@@ -85,7 +86,7 @@ pub enum Column {
         ordered: bool,
     },
     /// Text, as codes into its distinct values in order of first
-    /// appearance; -1 is missing.
+    /// appearance. A code of -1 is missing.
     Text {
         /// One code per row.
         codes: Vec<i32>,
@@ -94,7 +95,7 @@ pub enum Column {
     },
     /// A plain numeric or boolean array.
     Numbers(Numbers),
-    /// A nullable integer or boolean array; `mask[i]` is true where the value
+    /// A nullable integer or boolean array. `mask[i]` is true where the value
     /// is missing.
     Nullable {
         /// The values (arbitrary where masked).

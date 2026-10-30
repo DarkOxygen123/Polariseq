@@ -1,29 +1,26 @@
-//! Matrix container for cells × features data.
+//! Matrix types for cells × features data.
 //!
-//! Omics matrices are overwhelmingly sparse (single-cell expression is 90%+
-//! zeros), so the container must make sparse first-class without penalizing the
-//! dense embeddings (`X_pca`, `X_umap`) that show up later in a pipeline.
+//! Single-cell expression matrices are mostly zeros, often 90% or more, so the
+//! sparse format comes first, while the dense embeddings that come later in an
+//! analysis (`X_pca`, `X_umap`) cost nothing extra.
 //!
-//! Design choices:
-//! - **CSR is the primary sparse format.** It matches the scipy/AnnData
-//!   convention for scRNA-seq `X`, which is row-iterable (per-cell).
-//! - **f32 is the default float.** Halves memory vs f64 — critical for the
-//!   low-resource targets; scanpy/RAPIDS explicitly warn about f64 bloat.
-//! - **Owned `Vec`-backed CSR triple.** Cache-friendly, no external sparse
-//!   dependency in the core. The on-disk `.h5ad` layout *is* this triple.
+//! - **CSR is the main sparse format.** It is the convention of SciPy and
+//!   AnnData for scRNA-seq `X`, which is read one cell (row) at a time.
+//! - **Values are `f32`.** This halves the memory of `f64`, which matters most
+//!   on small machines.
+//! - **The CSR arrays are plain owned vectors.** No sparse-matrix dependency is
+//!   needed, and an `.h5ad` file stores the same three arrays.
 //!
-//! Storage types use `u32` for indices (supports up to 4 billion rows/cols —
-//! far beyond any current dataset) and `f32` for values. Wider element types
-//! can be added later behind a type parameter if needed.
+//! Indices are `u32`, enough for about 4 billion rows or columns.
 
 use rayon::prelude::*;
 
-/// The on-disk / in-memory representation of a cells × features matrix.
+/// How a cells × features matrix is stored.
 ///
-/// * `Dense` — row-major dense storage. Rare for scRNA-seq `X`, common for
-///   embeddings (`X_pca`, `X_umap`) and ATAC-seq after densification.
-/// * `Csr` — compressed sparse rows; the default for scRNA-seq `X`.
-/// * `Csc` — compressed sparse columns; used for column-wise ops (Phase 6+).
+/// * `Dense`: row-major dense values. Rare for scRNA-seq `X`, common for
+///   embeddings (`X_pca`, `X_umap`) and for ATAC-seq data made dense.
+/// * `Csr`: compressed sparse rows, the usual format of scRNA-seq `X`.
+/// * `Csc`: compressed sparse columns. No matrix type of the crate uses it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MatrixKind {
     /// Row-major dense storage.
@@ -233,10 +230,10 @@ impl DenseMatrix {
         }
     }
 
-    /// Return a column-major `faer::Mat` view for linear algebra. This is a
-    /// **copy** — faer is column-major, we are row-major. For PCA we accept the
-    /// transpose cost once; a future optimization stores dense matrices in
-    /// column-major when they're destined for linalg.
+    /// A column-major `faer::Mat` copy of the matrix, for linear algebra.
+    ///
+    /// faer stores matrices by column and this type stores them by row, so the
+    /// values are copied once.
     #[must_use]
     pub fn to_faer_col_major(&self) -> faer::Mat<f32> {
         let mut m = faer::Mat::<f32>::zeros(self.nrows, self.ncols);
@@ -249,17 +246,17 @@ impl DenseMatrix {
     }
 }
 
-/// A CSR (compressed sparse row) matrix of `f32`.
+/// A compressed sparse row (CSR) matrix of `f32` values.
 ///
-/// The canonical sparse representation for scRNA-seq expression data. Stored as
-/// the three CSR arrays plus shape. `u32` indices support up to ~4 billion
-/// rows/cols; `f32` values halve memory vs f64.
+/// The usual layout of scRNA-seq expression data: the three CSR arrays and the
+/// shape. `u32` indices allow up to about 4 billion rows or columns, and `f32`
+/// values take half the memory of `f64`.
 ///
-/// Invariants (validated on construction):
+/// These are checked when the matrix is built:
 /// - `indptr.len() == nrows + 1`
-/// - `indptr` is non-decreasing, starts at 0, ends at `nnz`
+/// - `indptr` starts at 0, never decreases, and ends at `nnz`
 /// - `data.len() == indices.len() == nnz == indptr[nrows]`
-/// - all `indices[k] < ncols`
+/// - every `indices[k] < ncols`
 #[derive(Debug, Clone, PartialEq)]
 pub struct CsrMatrix {
     /// Row pointers, length `nrows + 1`. `indptr[i]..indptr[i+1]` is the slice
@@ -401,9 +398,11 @@ impl CsrMatrix {
         (&self.indices[start..end], &self.data[start..end])
     }
 
-    /// Densify to a row-major `DenseMatrix`. Allocates `nrows * ncols` floats —
-    /// expensive for large sparse matrices; only call when you genuinely need
-    /// dense (e.g. for a small HVG subset before PCA).
+    /// The matrix as a row-major `DenseMatrix`.
+    ///
+    /// This allocates `nrows × ncols` values, which is a lot for a large sparse
+    /// matrix. Use it only when a dense matrix is needed, such as a small matrix of
+    /// selected genes before PCA.
     #[must_use]
     pub fn to_dense(&self) -> DenseMatrix {
         let mut out = DenseMatrix::zeros(self.nrows, self.ncols);
@@ -627,11 +626,12 @@ impl CsrMatrix {
         self.select_rows(&rows)
     }
 
-    /// Keep the columns in `cols`, in that order; the result has
-    /// `cols.len()` columns. Two passes (count, then fill), parallel over rows.
-    /// Within a row the surviving entries keep their original relative order,
-    /// so the output may have unsorted column indices — no kernel here
-    /// requires sorted indices.
+    /// Keep the columns in `cols`, in that order, so the result has `cols.len()`
+    /// columns.
+    ///
+    /// The work takes two passes (count, then fill), in parallel over the rows.
+    /// Within a row the kept entries keep their order, so the column indices of the
+    /// result may be unsorted, which no function of the crate requires.
     ///
     /// # Errors
     /// Returns [`MatrixError::IndexOutOfBounds`] for a column `>= ncols` and

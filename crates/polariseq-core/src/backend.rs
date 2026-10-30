@@ -1,23 +1,12 @@
-//! Compute backend abstraction.
+//! The compute backend trait: two canonical operations (PCA and the neighbor
+//! graph) behind one interface, and [`CpuBackend`], which runs them on the host
+//! CPU with `faer` and `rayon`.
 //!
-//! This is the architectural keystone of Polariseq. The same high-level API
-//! (Python or Rust) targets a [`ComputeBackend`], and the concrete backend
-//! decides where the work runs: the host CPU, an NVIDIA GPU (CUDA), any
-//! wgpu-compatible device (Metal / Vulkan / DX12), or a multi-node cluster.
-//!
-//! Today (Phase 0) only the trait and a stub [`CpuBackend`] exist. Real kernels
-//! land per the roadmap:
-//!
-//! | Backend            | Phase | Backing tech                       |
-//! |--------------------|-------|------------------------------------|
-//! | `CpuBackend`       | 2+    | `faer` + `sprs` + `rayon`          |
-//! | `CudaBackend`      | 7     | cuBLAS / cuSOLVER FFI              |
-//! | `WgpuBackend`      | 8     | `wgpu` (Metal/Vulkan/DX12)         |
-//! | `DistributedBackend` | 9   | MPI via `rsmpi`                    |
-//! | `HpuBackend`       | 10    | oneAPI / SYCL (Intel Gaudi)        |
-//!
-//! The trait is intentionally minimal now: it exists so that the crate
-//! boundaries are right from day one, not so that it is feature-complete.
+//! Every analysis step of Polariseq runs on the CPU and calls its kernels
+//! directly (`pca`, `neighbors`, ...). The trait is the boundary at which an
+//! implementation of those operations for another device would plug in.
+//! [`BackendKind`] names the device classes, and only [`BackendKind::Cpu`] has
+//! an implementation.
 
 use crate::matrix::Matrix;
 use crate::neighbors::NeighborsOptions;
@@ -27,9 +16,8 @@ use crate::pca::PcaOptions;
 /// the per-component variance ratio (what scanpy stores in `obsm['X_pca']` and
 /// `uns['pca']['variance_ratio']`).
 ///
-/// Fields are owned `Vec<f32>` because PCA output is small relative to the
-/// input matrix and owning it keeps the API simple for Phase 0. Phase 1+ will
-/// introduce zero-copy / mmap-backed variants for very large `n_obs`.
+/// Fields are owned `Vec<f32>`: the embedding is small beside the input
+/// matrix.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PcaResult {
     /// `n_obs * n_components` row-major embedding.
@@ -51,35 +39,32 @@ pub struct NeighborGraph {
     pub indptr: Vec<u32>,
     /// CSR `indices` (length = number of directed edges).
     pub indices: Vec<u32>,
-    /// CSR `data` (connectivity weights; aligned with `indices`).
+    /// CSR `data`: the connectivity weights, aligned with `indices`.
     pub data: Vec<f32>,
     /// Number of cells (rows of the graph).
     pub n_obs: usize,
 }
 
-/// Where work executes. The user-facing knob on the Python side
-/// (`ps.set_backend("cpu")`).
+/// The kind of device a backend runs on. Only `Cpu` has an implementation
+/// ([`CpuBackend`]). The others name device classes another backend could
+/// target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackendKind {
     /// Host CPU: SIMD + `rayon` parallelism. Always available.
     Cpu,
-    /// NVIDIA GPU via CUDA. Phase 7.
+    /// NVIDIA GPU via CUDA (no implementation).
     Cuda,
-    /// Portable GPU via wgpu (Metal/Vulkan/DX12). Phase 8.
+    /// Portable GPU via wgpu: Metal, Vulkan, DX12 (no implementation).
     Wgpu,
-    /// Multi-node distributed via MPI. Phase 9.
+    /// Several nodes via MPI (no implementation).
     Distributed,
-    /// HPU (Intel Gaudi) via oneAPI/SYCL. Phase 10.
+    /// Intel Gaudi via oneAPI/SYCL (no implementation).
     Hpu,
 }
 
-/// Trait every execution backend implements. Today this is a stub: it declares
-/// the shape of the API (a method per canonical op) so future phases can fill
-/// in real kernels without restructuring call sites.
-///
-/// Inputs are intentionally raw slices for now. Phase 1 introduces a proper
-/// `Matrix` type (dense / CSR / CSC, chunked, mmap-aware) and the signatures
-/// will take `&Matrix` instead.
+/// The trait every execution backend implements, with one method per canonical
+/// operation. PCA takes a [`Matrix`], and the neighbor graph takes the embedding
+/// as a row-major slice, the layout PCA returns.
 pub trait ComputeBackend {
     /// Which hardware this backend targets.
     fn kind(&self) -> BackendKind;
@@ -93,8 +78,9 @@ pub trait ComputeBackend {
     /// Returns [`BackendError::Pca`] on invalid inputs or SVD failure.
     fn pca(&self, matrix: &Matrix, options: &PcaOptions) -> Result<PcaResult, BackendError>;
 
-    /// kNN graph over a cell embedding. Returns the distance graph (scanpy's
-    /// `obsp['distances']`); connectivity weights are derived downstream.
+    /// The k-nearest-neighbor graph of a cell embedding. Returns the distance
+    /// graph, Scanpy's `obsp['distances']`, from which the connectivity weights
+    /// are derived later.
     ///
     /// # Errors
     /// Returns [`BackendError::Neighbors`] on invalid inputs.
@@ -110,12 +96,12 @@ pub trait ComputeBackend {
 /// Failures raised by compute backends.
 #[derive(Debug, thiserror::Error)]
 pub enum BackendError {
-    /// The operation is not implemented yet (gated behind a future phase).
+    /// The operation has no implementation on this backend.
     #[error("`{op}` is not implemented on this backend (lands in phase {phase})")]
     NotImplemented {
         /// Operation name, e.g. `"neighbors"`.
         op: &'static str,
-        /// Roadmap phase in which this op ships.
+        /// Development phase the message names.
         phase: u8,
     },
     /// PCA failed (bad inputs or SVD convergence).

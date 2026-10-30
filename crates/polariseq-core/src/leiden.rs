@@ -9,29 +9,37 @@
 // Single-character names (i, j, k, c, r, s, t, u, v, w) follow the notation of
 // Traag, Waltman & van Eck (2019).
 
-//! Leiden community detection (Traag, Waltman & van Eck 2019, "From Louvain
-//! to Leiden: guaranteeing well-connected communities", Sci. Rep. 9, 5233)
-//! on CSR.
+//! Leiden community detection (Traag, Waltman and van Eck 2019, "From Louvain
+//! to Leiden: guaranteeing well-connected communities", Sci. Rep. 9, 5233) on
+//! sparse graphs.
 //!
-//! The algorithm follows the paper's Algorithms A.2 and A.3 and the
-//! reference implementation by the same authors, CWTS `networkanalysis`
-//! (https://github.com/CWTSLeiden/networkanalysis, MIT licence, Copyright (c)
-//! 2018 Centre for Science and Technology Studies (CWTS), Leiden University;
-//! see `THIRD_PARTY_NOTICES.md`): fast local moving, refinement into
-//! well-connected sub-clusters, reduction of the graph onto the refined
-//! partition, repeated on the reduced graph until nothing moves.
+//! The algorithm follows the paper's Algorithms A.2 and A.3 and the reference
+//! implementation by the same authors, CWTS `networkanalysis`
+//! (<https://github.com/CWTSLeiden/networkanalysis>, MIT license, Copyright (c)
+//! 2018 Centre for Science and Technology Studies (CWTS), Leiden University,
+//! see `THIRD_PARTY_NOTICES.md`). Each round runs fast local moving, refines the
+//! clusters into well-connected sub-clusters, and reduces the graph onto the
+//! refined clusters, repeating on the reduced graph until nothing moves.
 //!
-//! The quality function is modularity with resolution γ, written as the
-//! constant Potts model with node weights `k_i` (the strengths) and
-//! resolution `γ / 2m`, as in the CWTS code. Two iterations from the previous
-//! partition are run, the number Scanpy's documentation recommends.
+//! The quality function is modularity with resolution `γ`, written as the
+//! constant Potts model with node weights `k_i` (the strengths) and resolution
+//! `γ / 2m`, as in the CWTS code:
 //!
-//! The data layout is our own: the graph is borrowed in place (it can be a
-//! memory-mapped file), the sums over neighbouring clusters use a dense
-//! scratch vector and the list of clusters touched, reductions are a
-//! counting-sort CSR build with the rows merged in parallel, and one
-//! `ChaCha8` stream drives every random choice, so the same graph and seed
-//! give the same output.
+//! ```text
+//! Q = Σ_ij (A_ij − (γ / 2m) · k_i k_j) · δ(c_i, c_j)
+//! ```
+//!
+//! where `m` is the total edge weight and `c_i` the cluster of node `i`. Two
+//! iterations from the previous clustering are run, the number Scanpy's
+//! documentation recommends.
+//!
+//! # Implementation notes
+//!
+//! The graph is borrowed in place and can be a memory-mapped file. The sums over
+//! neighboring clusters use a dense scratch vector and a list of the clusters
+//! touched. Reductions build a sparse matrix by counting sort, with the rows
+//! merged in parallel. One `ChaCha8` stream drives every random choice, so the
+//! same graph and seed give the same clusters.
 
 use std::borrow::Cow;
 
@@ -193,7 +201,7 @@ pub(crate) fn weighted_from_distances(graph: &NeighborGraph) -> WeightedGraph<'s
 /// This is the entry point for a caller that already holds the
 /// connectivities. Passing them to [`weighted_from_distances`] instead
 /// treats similarities as distances and builds the fuzzy set a second time,
-/// which inverts which neighbours are close; `tl.leiden` did exactly that
+/// which inverts which neighbors are close; `tl.leiden` did exactly that
 /// from 2026-09-06 until this function existed.
 pub(crate) fn weighted_from_connectivities(graph: NeighborGraph) -> WeightedGraph<'static> {
     let n = graph.n_obs;
@@ -283,10 +291,10 @@ const MAX_MOVES_PER_VERTEX: usize = 100;
 /// that starts as a random permutation of all nodes. A node is taken out of
 /// its cluster and moved to the candidate with the largest gain
 /// `w(i, C) − res · k_i · K_C`; the candidates are one empty cluster (gain
-/// 0, so a node can always leave) and the clusters of its neighbours, in the
+/// 0, so a node can always leave) and the clusters of its neighbors, in the
 /// order its edges reach them. Its own cluster wins every tie, which with
 /// [`MOVE_REL_TOL`] also covers gains equal up to rounding. When a node
-/// moves, its neighbours outside the new cluster that were stable rejoin the
+/// moves, its neighbors outside the new cluster that were stable rejoin the
 /// queue. Self-loops carry no gain and are skipped.
 ///
 /// `membership` ids must be below `wg.n` (singletons, or a compacted
@@ -404,7 +412,7 @@ fn fast_local_move(
 /// Each cluster C starts as singletons, visited in random order. A node v
 /// still in a singleton, and well connected to the rest of C
 /// (`w(v, C∖v) ≥ res · k_v · (K_C − k_v)`), may join a sub-cluster S of a
-/// neighbour in C that is itself well connected
+/// neighbor in C that is itself well connected
 /// (`w(S, C∖S) ≥ res · K_S · (K_C − K_S)`), or stay alone (gain 0). Among
 /// the candidates with a non-negative gain Δ it picks one with probability
 /// proportional to `exp(Δ / θ)`. The exponents are shifted by the largest
@@ -995,7 +1003,7 @@ mod tests {
     #[test]
     fn ring_of_cliques_one_each() {
         // 5 cliques of 4 nodes on a ring, single weak link between
-        // neighbours — the canonical community structure.
+        // neighbors — the canonical community structure.
         let mut edges = Vec::new();
         for c in 0..5 {
             let base = c * 4;

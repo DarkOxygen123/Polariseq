@@ -40,7 +40,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/DarkOxygen123/Polariseq"
-Documentation = "https://github.com/DarkOxygen123/Polariseq#readme"
+Documentation = "https://darkoxygen123.github.io/Polariseq/"
 Source = "https://github.com/DarkOxygen123/Polariseq"
 Issues = "https://github.com/DarkOxygen123/Polariseq/issues"
 Changelog = "https://github.com/DarkOxygen123/Polariseq/blob/main/CHANGELOG.md"

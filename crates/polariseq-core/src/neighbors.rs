@@ -45,7 +45,7 @@ pub struct NeighborsOptions {
     pub n_neighbors: usize,
     /// Distance metric.
     pub metric: Metric,
-    /// Random seed (for randomized variants; unused by exact kNN).
+    /// Random seed of the randomized searches (the exact search does not use it).
     pub seed: u64,
 }
 

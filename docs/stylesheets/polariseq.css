@@ -1,0 +1,121 @@
+/* Inter and JetBrains Mono, bundled with the site (SIL Open Font License 1.1; the licences are
+   beside the files). Variable fonts: one file holds every weight. Latin characters only. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../assets/fonts/inter-latin-wght-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../assets/fonts/inter-latin-wght-italic.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("../assets/fonts/jetbrains-mono-latin-wght-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: italic;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("../assets/fonts/jetbrains-mono-latin-wght-italic.woff2") format("woff2");
+}
+:root {
+  --md-text-font: "Inter";
+  --md-code-font: "JetBrains Mono";
+}
+
+/* The README's palette: blue accent, slate header. */
+:root {
+  --md-primary-fg-color: #2e3340;
+  --md-primary-fg-color--light: #444b5c;
+  --md-primary-fg-color--dark: #22262f;
+  --md-accent-fg-color: #3e7fc1;
+}
+
+[data-md-color-scheme="default"] {
+  --md-typeset-a-color: #2f6aa8;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-default-bg-color: #1c1f26;
+  --md-typeset-a-color: #7fb0e3;
+  --md-accent-fg-color: #7fb0e3;
+}
+
+/* The banner says the name; the home page's title is for the tab and search only. */
+.md-typeset h1.home-title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+/* Buttons in the accent blue, readable on both backgrounds. */
+.md-typeset .md-button {
+  color: var(--md-accent-fg-color);
+  border-color: var(--md-accent-fg-color);
+}
+.md-typeset .md-button--primary,
+.md-typeset .md-button:hover {
+  background-color: var(--md-accent-fg-color);
+  border-color: var(--md-accent-fg-color);
+  color: #fff;
+}
+[data-md-color-scheme="slate"] .md-typeset .md-button--primary,
+[data-md-color-scheme="slate"] .md-typeset .md-button:hover {
+  color: #1c1f26;
+}
+
+/* API pages: one function per heading, separated. */
+.doc-object + .doc-object {
+  border-top: 1px solid var(--md-default-fg-color--lightest);
+  padding-top: 0.6rem;
+}
+
+/* Symbol badges (func, meth, class) in the site's blue. */
+:root, [data-md-color-scheme="slate"] {
+  --doc-symbol-function-fg-color: var(--md-accent-fg-color);
+  --doc-symbol-method-fg-color: var(--md-accent-fg-color);
+  --doc-symbol-class-fg-color: #5f9e8f;
+  --doc-symbol-attribute-fg-color: #8c96a6;
+  --doc-symbol-function-bg-color: color-mix(in srgb, var(--md-accent-fg-color) 12%, transparent);
+  --doc-symbol-method-bg-color: color-mix(in srgb, var(--md-accent-fg-color) 12%, transparent);
+  --doc-symbol-class-bg-color: color-mix(in srgb, #5f9e8f 12%, transparent);
+  --doc-symbol-attribute-bg-color: color-mix(in srgb, #8c96a6 12%, transparent);
+}
+
+/* API function pages: the namespace the function belongs to, above its title. */
+.md-typeset .api-parent {
+  font-size: 0.72rem;
+  margin: 0 0 0.3rem;
+}
+.md-typeset h1.doc-heading {
+  margin-bottom: 0.8rem;
+}
+
+/* Diagrams: at their drawn size, never wider than the column. No display rule: Material hides
+   the other theme's copy (#only-light / #only-dark) with display: none. */
+.md-typeset img[src*="assets/diagrams/"] {
+  max-width: 100%;
+}
+/* A figure holds a light and a dark copy of its image on separate lines of Markdown; the line
+   break between them would add an empty line above the caption. */
+.md-typeset figure br {
+  display: none;
+}
+.md-typeset figure figcaption {
+  color: var(--md-default-fg-color--light);
+  font-size: 0.68rem;
+  margin-top: 0.4rem;
+  margin-bottom: 0;
+}

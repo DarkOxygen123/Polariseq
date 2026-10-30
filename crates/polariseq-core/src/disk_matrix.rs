@@ -6,29 +6,21 @@
     clippy::must_use_candidate,
     clippy::doc_markdown
 )]
-//! Disk-backed sparse matrix (DBCSR) for out-of-core processing.
+//! A sparse matrix backed by memory-mapped files, for out-of-core work.
 //!
-//! When a dataset is too large for RAM, Polariseq extracts the CSR triple
-//! (data, indices, indptr) to flat binary files on SSD, then memory-maps them.
-//! The OS page cache transparently manages which pages stay in RAM — hot
-//! pages (recently accessed rows) are cached; cold pages are evicted to SSD.
+//! The CSR arrays (`data`, `indices`, `indptr`) are written to flat files on
+//! disk and memory-mapped. The operating system's page cache decides which
+//! pages stay in memory, so a sequential pass over the rows reads at close to
+//! in-memory speed.
 //!
-//! This lets us process matrices larger than RAM with near-RAM speed for
-//! sequential access patterns (which is what our streaming algorithms use).
+//! [`ResourceLimits`] holds the memory and disk limits, and its `fits_in_ram`
+//! and `fits_on_ssd` say whether a matrix fits each.
 //!
-//! ## Resource limits
+//! # Files
 //!
-//! The user sets `max_ram_gb` and `max_ssd_gb`. The system checks:
-//! - If the dataset fits in `max_ram_gb` → load into RAM (fast path)
-//! - If it fits in `max_ssd_gb` → extract to SSD + mmap (streaming path)
-//! - If it exceeds both → error
-//!
-//! ## Layout
-//!
-//! A DBCSR is stored as three files:
-//! - `{prefix}.data`    — `nnz × f32` (4 bytes each)
-//! - `{prefix}.indices` — `nnz × u32` (4 bytes each)
-//! - `{prefix}.indptr`  — `(nrows+1) × u32` (4 bytes each)
+//! - `{prefix}.data`: `nnz` values of `f32`, 4 bytes each.
+//! - `{prefix}.indices`: `nnz` values of `u32`, 4 bytes each.
+//! - `{prefix}.indptr`: `nrows + 1` values of `u32`, 4 bytes each.
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -37,10 +29,11 @@ use std::path::{Path, PathBuf};
 use memmap2::{Mmap, MmapMut};
 use rayon::prelude::*;
 
-/// A CSR matrix backed by memory-mapped files on SSD.
+/// A CSR matrix backed by memory-mapped files.
 ///
-/// The data stays on disk; only accessed pages are in RAM (managed by the OS
-/// page cache). This enables processing matrices larger than available RAM.
+/// The data stays on disk, and only the pages a pass touches are held in memory,
+/// by the operating system's page cache. This allows matrices larger than the
+/// memory available.
 pub struct DiskBackedCSR {
     /// Memory-mapped data array (read-write for in-place transforms).
     data_mmap: MmapMut,
@@ -330,7 +323,8 @@ impl DiskBackedCSR {
     /// deleting the files on drop. `nnz` is taken from the data file's size.
     ///
     /// This is the read side of spill-to-SSD: a matrix written once (while
-    /// loading) and then streamed through the kernels as a [`RowBlocks`]
+    /// loading) and then streamed through the kernels as a
+    /// [`RowBlocks`](crate::rowblocks::RowBlocks)
     /// source.
     pub fn open_at(prefix: &Path, nrows: usize, ncols: usize) -> std::io::Result<Self> {
         let data_path = prefix.with_extension("data");

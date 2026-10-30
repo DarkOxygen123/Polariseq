@@ -5,27 +5,25 @@
     clippy::case_sensitive_file_extension_comparisons
 )]
 
-//! 10x Genomics format readers.
+//! Readers of 10x Genomics files, in their two layouts.
 //!
-//! Two on-disk layouts:
-//!
-//! **`.h5` format** (Cell Ranger HDF5):
+//! **The `.h5` file** written by Cell Ranger:
 //! ```text
-//! /matrix/data     — nnz × f32/f64 (column-major CSC values)
-//! /matrix/indices  — nnz × i32/i64 (row indices per column)
-//! /matrix/indptr   — (ncols+1) × i64 (column pointers)
-//! /matrix/shape    — [nrows, ncols] = [n_genes, n_cells]
-//! /matrix/barcodes — cell barcode strings
-//! /matrix/features/name, /matrix/features/id — gene names/IDs
+//! /matrix/data       nnz × f32 or f64   (values, column by column)
+//! /matrix/indices    nnz × i32 or i64   (row indices per column)
+//! /matrix/indptr     (ncols + 1) × i64  (column pointers)
+//! /matrix/shape      [nrows, ncols] = [n_genes, n_cells]
+//! /matrix/barcodes   cell barcodes
+//! /matrix/features/name, /matrix/features/id   gene names and ids
 //! ```
-//! Note: 10x stores genes × cells (transposed vs our cells × genes). We
-//! transpose on load to match the AnnData convention.
+//! 10x stores genes × cells, so the matrix is transposed on loading into the
+//! cells × genes layout of AnnData.
 //!
-//! **MatrixMarket `.mtx` format** (three files in a directory):
+//! **The MatrixMarket folder**, three files:
 //! ```text
-//! matrix.mtx    — sparse matrix in MatrixMarket coordinate format
-//! barcodes.tsv  — cell barcodes (one per line)
-//! features.tsv  — gene info (id \t name \t type per line; older: genes.tsv)
+//! matrix.mtx     the sparse matrix, in MatrixMarket coordinate format
+//! barcodes.tsv   cell barcodes, one per line
+//! features.tsv   gene information (id, name, type per line, genes.tsv in older versions)
 //! ```
 
 use hdf5_metno::File;

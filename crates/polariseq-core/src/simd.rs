@@ -1,14 +1,15 @@
-//! Vectorisable `f32` kernels shared by PCA, kNN and UMAP.
+//! `f32` kernels shared by PCA, the neighbor search and UMAP, written so the
+//! compiler can vectorize them.
 //!
-//! Rust (without `-ffast-math`) will not reassociate a floating-point
-//! reduction, so a plain `s += d * d` loop compiles to a serial dependency
-//! chain — one lane of the vector unit. Splitting the accumulation into
-//! eight independent partial sums lets LLVM vectorise it and hides the FMA
-//! latency; the partials are combined in a fixed order, so results are
-//! deterministic run to run.
+//! Rust does not reorder floating-point additions, so a plain `s += d * d` loop
+//! compiles to a chain of dependent additions that uses one lane of the vector
+//! unit. Splitting the sum into eight independent partial sums lets the compiler
+//! use the whole unit and hides the latency of each multiply-add. The partial
+//! sums are combined in a fixed order, so the results are the same on every
+//! run.
 //!
-//! These are plain safe Rust: no intrinsics, no nightly, portable to every
-//! target the wheels are built for.
+//! These are plain safe Rust, with no intrinsics and no nightly features, so they
+//! work on every target the wheels are built for.
 
 const LANES: usize = 8;
 

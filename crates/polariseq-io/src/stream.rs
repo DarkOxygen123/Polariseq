@@ -1,25 +1,20 @@
-//! Streaming a `.h5ad` matrix as [`RowBlocks`] — the out-of-core source.
+//! Reading a `.h5ad` matrix as [`RowBlocks`]: the source of the out-of-core
+//! path.
 //!
-//! The whole point of phase 6 is that a kernel should not care where its
-//! rows come from. [`H5adStream`] makes an on-disk `.h5ad` look like any
-//! other block source, so `qc_metrics`, `gene_mean_var`, `gram_matrix`,
-//! `spmm`/`spmm_t` — and therefore PCA and HVG — run on a file that never
-//! fits in RAM, using the same code (and producing bit-identical results)
-//! as the in-memory path.
+//! A kernel should not depend on where its rows come from. [`H5adStream`] makes
+//! an `.h5ad` file on disk look like any other source of blocks, so
+//! `qc_metrics`, `gene_mean_var`, `gram_matrix`, `spmm` and `spmm_t`, and
+//! therefore PCA and gene selection, run on a file too large for memory with
+//! the same code, and the same bits, as the in-memory path.
 //!
-//! ## Why reads are serialised
+//! # Reads happen one at a time
 //!
-//! The vendored HDF5 is **not thread-safe**: calls from two threads at once
-//! can corrupt its state. Blocks are therefore read one at a time on the calling thread; the
-//! *work* is what runs in parallel. Each pass reads a batch of up to
-//! [`PREFETCH`] blocks sequentially, then hands the batch to rayon and
-//! calls `f` on each block concurrently. Peak memory is bounded by
-//! `PREFETCH × rows_per_block` rows of nonzeros, not by the file.
-//!
-//! That ordering is also why this is fast enough to be worth doing: the
-//! read is one sequential scan of the compressed chunks and the decode
-//! overlaps the next read only across batches, but the alternative — a
-//! parallel read — is a crash, not a speedup.
+//! The bundled HDF5 library is not thread-safe: calls from two threads at once
+//! can corrupt its state. Blocks are therefore read one at a time, on the
+//! calling thread, and the work on them runs in parallel. Each pass reads a
+//! batch of a few blocks in order, then calls `f` on each block of the batch
+//! in parallel. Peak memory is set by the batch size times `rows_per_block`
+//! rows, not by the size of the file.
 
 use polariseq_core::rowblocks::RowBlocks;
 use polariseq_core::rsvd::CsrRef;
@@ -54,7 +49,7 @@ pub struct H5adStream {
 /// its blocks are decoded copies read off a disk rather than slices of a
 /// resident matrix. So the source clamps.
 ///
-/// This is not a micro-optimisation. At ~1 100 nonzeros per cell a
+/// This is not a micro-optimization. At ~1 100 nonzeros per cell a
 /// 32 768-row block is ~292 MB, and four in flight is 1.17 GB of pure
 /// working space — more than some machines have free. `ps.plan()` solves
 /// for the rows that fit the budget and passes the answer here.
@@ -136,20 +131,20 @@ impl RowBlocks for H5adStream {
         self.meta.n_genes
     }
 
-    /// Reads sequentially in batches (HDF5 is not thread-safe), then runs
-    /// `f` over each batch in parallel. A read failure mid-pass stops the
-    /// iteration; the block is simply not visited, and
-    /// [`H5adStream::run`] is the checked entry point that reports it.
+    /// Reads the blocks in batches, one at a time since HDF5 is not
+    /// thread-safe, then runs `f` over each batch in parallel. A read failure
+    /// stops the pass, and the failing block is not visited.
+    /// [`H5adStream::run`] does the same and reports the error.
     fn for_each_block(&self, rows_per_block: usize, f: &(dyn Fn(usize, CsrRef<'_>) + Sync)) {
         let _ = self.run(rows_per_block, f);
     }
 }
 
 impl H5adStream {
-    /// [`RowBlocks::for_each_block`] with the read errors kept.
+    /// [`RowBlocks::for_each_block`], with the read errors kept.
     ///
     /// # Errors
-    /// Returns the first read failure; blocks before it have been visited.
+    /// Returns the first read failure. The blocks before it have been visited.
     pub fn run(&self, rows_per_block: usize, f: &(dyn Fn(usize, CsrRef<'_>) + Sync)) -> Result<()> {
         let n = self.n_rows();
         // The kernel asks; the source caps. See `StreamLimits`.

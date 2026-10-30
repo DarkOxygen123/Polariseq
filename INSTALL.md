@@ -72,7 +72,7 @@ python -c "import polariseq as ps; print(ps.__version__); print(ps.resources())"
 ## 2. Extras: add what you need
 
 The install above is the analysis alone: reading `.h5ad` and 10x files, planning, quality control,
-normalization, gene selection, PCA, the neighbour graph, Leiden clustering (multi-level Louvain with
+normalization, gene selection, PCA, the neighbor graph, Leiden clustering (multi-level Louvain with
 `method="fast"`), UMAP, Paris, PAGA, marker genes, doublets (Scrublet), integration (Harmony) and comparisons
 between conditions, with NumPy and pandas as its only Python dependencies. Each extra adds one purpose:
 
@@ -80,7 +80,7 @@ between conditions, with NumPy and pandas as its only Python dependencies. Each 
 |---|---|---|
 | `plot` | Matplotlib | every figure: `ps.pl.umap`, dot plots, violins, heatmaps, volcano plots, QC and overview figures, and the figures examples 02, 04, 05 and 06 write |
 | `anndata` | AnnData, SciPy | `adata.to_anndata()` and writing `.h5ad`, to continue in Scanpy, scVI or any tool built on AnnData; example 05 reads its data with it |
-| `scipy` | SciPy | results as SciPy sparse matrices, to hand to other tools: the neighbour graph in `adata.obsp`, `.to_scipy()`, `adata.sample()` |
+| `scipy` | SciPy | results as SciPy sparse matrices, to hand to other tools: the neighbor graph in `adata.obsp`, `.to_scipy()`, `adata.sample()` |
 | `markers` | pyreadr, openpyxl | the marker databases fetched on request: `ps.tl.auto_annotate(adata, source="accordion")` (also `"cellmarker"`, `"sctype"`) |
 | `celltypist` | CellTypist, AnnData, SciPy | cell-type annotation with CellTypist models: `ps.tl.auto_annotate(adata, source="celltypist")` |
 | `all` | all of the above: Matplotlib, AnnData, SciPy, CellTypist, pyreadr, openpyxl | everything; the same as `[plot,anndata,scipy,markers,celltypist]`. The largest install, since CellTypist brings Scanpy and scikit-learn |
@@ -95,7 +95,7 @@ pip install "polariseq[all] @ git+https://github.com/DarkOxygen123/Polariseq.git
 
 On Windows the same lines work in PowerShell. An extra can be added later the same way (pip keeps the
 build it has), or by installing the package itself (`pip install matplotlib`). Without SciPy, the
-neighbour graph in `adata.obsp` holds its CSR arrays (`indptr`, `indices`, `data`), gives the same clusters
+neighbor graph in `adata.obsp` holds its CSR arrays (`indptr`, `indices`, `data`), gives the same clusters
 and layouts, and its `to_scipy()` converts it once SciPy is installed. A function that needs a missing extra
 stops with a message that names it.
 

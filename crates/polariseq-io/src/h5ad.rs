@@ -1,18 +1,18 @@
-//! `.h5ad` (`AnnData` on HDF5) reader.
+//! Reader of `.h5ad` files, AnnData on HDF5.
 //!
-//! Reads the X matrix (dense or sparse CSR/CSC) plus obs/var into Polariseq's
-//! native types. The on-disk layout follows the anndata element-encoding spec:
-//! every element has `encoding-type` / `encoding-version` attributes.
+//! Reads the `X` matrix (dense, or sparse CSR or CSC) and the `obs` and `var`
+//! tables into this crate's types. The layout on disk follows the anndata
+//! element-encoding specification: every element carries `encoding-type` and
+//! `encoding-version` attributes.
 //!
-//! Currently supported:
-//! - `X` as dense `array` (float32, float64)
-//! - `X` as `csr_matrix` / `csc_matrix` (the sparse triple `{data,indices,indptr}` + `shape`)
-//! - `obs`/`var` row names (the `_index`) and numeric columns
+//! What is read:
+//! - `X` as a dense `array` (`float32` or `float64`),
+//! - `X` as a `csr_matrix` or `csc_matrix` (the arrays `data`, `indices`,
+//!   `indptr` and the `shape`),
+//! - the `obs` and `var` row names and columns, in every column encoding anndata
+//!   writes ([`AnnDataFile::read_frame`], [`crate::frame`]).
 //!
-//! Not yet supported (incremental, as needed): categorical obs columns, nullable
-//! arrays, string columns beyond the index, `uns`, `obsm`/`varm`. Each lands as
-//! a downstream phase requires it; the X-matrix path — the hot path — is
-//! complete.
+//! `uns`, `obsm`, `varm` and `layers` are not read.
 
 use hdf5_metno::{File, Group};
 use polariseq_core::{CsrMatrix, DenseMatrix, Matrix};
@@ -122,13 +122,13 @@ impl AnnDataFile {
         }
     }
 
-    /// Read the X matrix into a Polariseq [`Matrix`].
+    /// Read the `X` matrix into a [`Matrix`].
     ///
-    /// Returns dense or sparse depending on what's on disk. Float64 data is
-    /// narrowed to float32 (our default — see `matrix.rs` rationale).
+    /// Returns a dense or sparse matrix, as stored on disk. `float64` values are
+    /// narrowed to `float32`, the value type of this crate's matrices.
     ///
     /// # Errors
-    /// Returns [`IoError`] on any read or layout failure.
+    /// Returns [`IoError`] for any read or layout failure.
     pub fn read_x(&self) -> Result<Matrix> {
         let info = self.x_info()?;
         match info.encoding {

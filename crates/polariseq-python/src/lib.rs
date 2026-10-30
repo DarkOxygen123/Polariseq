@@ -82,7 +82,8 @@ fn pca_dict<'py>(
     Ok(dict)
 }
 
-/// Triple every element of a 1-D float64 numpy array (Phase 0 round-trip canary).
+/// Triple every element of a 1-D float64 numpy array: the round-trip check that
+/// the extension is built and linked (it calls `polariseq_core::double_in_place`).
 #[pyfunction]
 fn triple<'py>(
     py: Python<'py>,
@@ -576,7 +577,7 @@ fn fuzzy_connectivities<'py>(
     n_obs: usize,
 ) -> PyResult<Bound<'py, PyDict>> {
     // Borrowed, not copied: the distance graph can be large (4M cells x 14
-    // neighbours), and it is only read.
+    // neighbors), and it is only read.
     let (ip, ix, dx) = (indptr.as_slice()?, indices.as_slice()?, data.as_slice()?);
     let (c_indptr, c_indices, c_weights) =
         py.detach(|| polariseq_core::umap::fuzzy_connectivities_from(ip, ix, dx, n_obs));
@@ -875,7 +876,7 @@ fn harmony_correct<'py>(
 /// Run the whole disk-backed preprocessing pass on a `.h5ad` too large for
 /// RAM: stream-spill to SSD, QC, `normalize_total`, `log1p`, HVG, PCA.
 ///
-/// Nothing is ever fully materialised — the previous pair of functions
+/// Nothing is ever fully materialized — the previous pair of functions
 /// (`extract_csr_to_disk` + `pca_disk`) read the entire matrix into RAM and
 /// then built a second complete copy of it as bytes before writing. Returns
 /// the embedding plus the QC and HVG results computed along the way.
@@ -1375,8 +1376,8 @@ pub(crate) fn de_result_dict<'py>(
 }
 
 /// Marker ranking for a matrix that stays in its file: per-cluster
-/// statistics of the normalised, log-transformed matrix streamed from
-/// `path` (rows normalised over the genes in `gene_keep`), then the same
+/// statistics of the normalized, log-transformed matrix streamed from
+/// `path` (rows normalized over the genes in `gene_keep`), then the same
 /// Welch test as the in-memory `rank_genes_groups`. Labels `>= n_groups`
 /// mark cells left out (filtered in quality control). Gene indices refer to
 /// the file's genes.
@@ -1494,7 +1495,7 @@ fn streaming_cluster_means<'py>(
 
 /// Streaming per-cluster statistics over the NORMALISED (normalize-total +
 /// log1p) matrix: sums, sums of squares, expressing-cell counts and cluster
-/// sizes, per (gene, cluster) — without materialising the matrix. Memory is
+/// sizes, per (gene, cluster) — without materializing the matrix. Memory is
 /// O(n_genes × n_clusters) plus one block. Label ids >= n_clusters are
 /// ignored, which is how a caller excludes quality-filtered cells.
 #[pyfunction]

@@ -1,0 +1,60 @@
+name: Docs
+
+# Builds the documentation website (MkDocs, with the Rust API reference from cargo doc) and
+# publishes it to GitHub Pages: https://darkoxygen123.github.io/Polariseq/
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; a newer push replaces a queued one.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the docs tools
+        run: pip install -r scripts/docs-requirements.txt
+
+      - name: Install Rust toolchain (stable)
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build the Rust API reference
+        # polariseq-io builds HDF5 from source (CMake and a C compiler, both on the runner).
+        run: cargo doc --no-deps -p polariseq-core -p polariseq-io
+
+      - name: Build the site
+        env:
+          NO_MKDOCS_2_WARNING: "1"
+        run: mkdocs build --strict
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

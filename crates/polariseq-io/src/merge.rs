@@ -1,12 +1,12 @@
-//! Several `.h5ad` files read as one matrix: their cells one after another,
-//! over one set of genes.
+//! Several `.h5ad` files read as one matrix: their cells one after another, over
+//! one set of genes.
 //!
-//! Genes are matched by name before the matrix is read, which gives each file
-//! a map from its columns to the merged ones; the maps are applied while the
-//! rows stream past, so the merged matrix is never assembled from copies of
-//! the files. Each row's entries come out in merged-column order, so the
-//! matrix is the one a physically merged, sorted file holds, whether it is
-//! kept in memory ([`read_many`]) or written to the block store
+//! Genes are matched by name before the matrix is read, which gives each file a
+//! map from its columns to the merged ones. The maps are applied while the rows
+//! are read, so the merged matrix is never assembled from copies of the files.
+//! Each row's entries come out in the order of the merged columns, so the matrix
+//! is the one a merged and sorted file would hold, whether it is kept in memory
+//! ([`read_many`]) or written to the block store
 //! ([`crate::spill::spill_h5ad_many`]).
 
 use polariseq_core::rowblocks::RowBlocks;
@@ -93,13 +93,14 @@ pub fn for_each_block(
     Ok(n_rows)
 }
 
-/// The merged matrix, in memory. `nnz_hint` (the files' entries summed, an
-/// upper bound) reserves the arrays once; pages beyond the entries kept are
-/// never touched.
+/// The merged matrix, in memory.
+///
+/// `nnz_hint`, the files' entries summed, is an upper bound used to reserve the
+/// arrays once. Memory past the entries kept is never touched.
 ///
 /// # Errors
-/// As [`for_each_block`], or if the merged matrix exceeds the u32
-/// row-pointer limit.
+/// As [`for_each_block`], or if the merged matrix exceeds the limit of `u32`
+/// row pointers.
 pub fn read_many(
     paths: &[String],
     gene_maps: &[Vec<u32>],

@@ -1,33 +1,45 @@
-//! Paris hierarchical clustering of a graph, and cuts of its dendrogram.
+//! Paris hierarchical clustering of a graph, and cuts of its tree.
 //!
-//! Paris (Bonald, Charpentier, Galland and Hollocou, 2018, "Hierarchical
-//! graph clustering using node pair sampling") merges, at every step, the
-//! two clusters `a`, `b` with the largest node-pair sampling similarity
-//! `p(a, b) / (p(a) p(b))`, found with the nearest-neighbour chain. The
-//! merge height is the inverse similarity. One pass over the graph gives the
-//! whole hierarchy, so clusters at any resolution come from cutting it,
-//! without clustering again.
+//! Paris (Bonald, Charpentier, Galland and Hollocou 2018, "Hierarchical graph
+//! clustering using node pair sampling") builds the whole hierarchy of a graph
+//! in one pass. At each step it merges the two clusters with the largest
+//! similarity
 //!
-//! [`paris`] reproduces scikit-network's `Paris` (BSD-3-Clause, Bonald,
-//! Charpentier and Lutz) bit for bit, and [`cut_balanced`] reproduces Scarf's
-//! `BalancedCut` (BSD-3-Clause, Dhapola and Karlsson), because a port is only
-//! as trustworthy as the evidence that it computes the same thing. That
-//! includes their arithmetic, which is part of their output:
+//! ```text
+//! s(a, b) = p(a, b) / (p(a) · p(b))
+//! ```
 //!
-//! * edge probabilities are `A_ij / f32(ΣA)` in `f64`: the total is rounded
-//!   to `f32` (a `cdef float` in the reference);
-//! * node probabilities are weighted degrees over their sum, with NumPy's
-//!   summation order ([`numpy_sum`]);
-//! * similarities are computed and compared in `f32`, heights are
-//!   `1 / f64(similarity)`;
-//! * ties go to the smallest cluster index, the chain starts at the oldest
-//!   remaining cluster, and disconnected components are joined at infinite
-//!   height, last component first.
+//! where `p(a, b)` is the share of the graph's edge weight between clusters
+//! `a` and `b`, and `p(a)` the share attached to `a`. The pair is found with
+//! the nearest-neighbor chain, and the merge happens at height `1 / s(a, b)`.
+//! Cutting the tree gives clusterings at any resolution without clustering
+//! again: [`cut_straight`] cuts it at one height, and [`cut_balanced`] into
+//! clusters of bounded size.
 //!
-//! Memory: each cluster keeps its neighbours as two sorted parallel vectors
-//! (`u32` ids, `f64` weights), 12 bytes per stored direction of an edge. A
-//! merged cluster always has the largest id so far, so appending it keeps
-//! every list sorted, without hashing.
+//! # Agreement with the reference implementations
+//!
+//! [`paris`] gives the same tree as scikit-network's `Paris`, bit for bit, and
+//! [`cut_balanced`] the same clusters as Scarf's `BalancedCut` (both
+//! BSD-3-Clause, see `THIRD_PARTY_NOTICES.md`). To give the same bits, the
+//! arithmetic follows theirs:
+//!
+//! - Edge probabilities are `A_ij / ΣA` in `f64`, with the total `ΣA` first
+//!   rounded to `f32`, as the reference stores it.
+//! - Node probabilities are the weighted degrees over their sum, added up in
+//!   NumPy's order ([`numpy_sum`]).
+//! - Similarities are computed and compared in `f32`, and heights are
+//!   `1 / similarity` in `f64`.
+//! - Ties go to the smallest cluster index, and the chain starts at the oldest
+//!   remaining cluster.
+//! - Disconnected parts of the graph are joined at infinite height, the last
+//!   part first.
+//!
+//! # Implementation notes
+//!
+//! Each cluster keeps its neighbors in two sorted vectors (ids as `u32`,
+//! weights as `f64`), 12 bytes for each direction of an edge. A merged cluster
+//! always gets the largest id so far, so appending it keeps every list sorted
+//! without a hash table.
 
 // Project names (NumPy, SciPy) appear in prose; short names (i, j, p, q, t_ix,
 // t_dx) follow the references' notation.
@@ -53,19 +65,19 @@ pub enum HierarchyError {
     InvalidCut(String),
 }
 
-/// One merge of a dendrogram: `[a, b, height, size]`. Leaves are `0..n`;
-/// merge `t` creates cluster `n + t`. The layout of scipy's `linkage` and
-/// scikit-network's `dendrogram_`.
+/// One merge of a dendrogram: `[a, b, height, size]`, the layout of SciPy's
+/// `linkage` and scikit-network's `dendrogram_`. The leaves are `0..n`, and
+/// merge `t` creates cluster `n + t`.
 pub type Merge = [f64; 4];
 
 /// Options for [`paris`].
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ParisOptions {
-    /// Reorder merges by non-decreasing height (scikit-network's
-    /// `reorder=True`; Scarf uses `False`, the default here).
+    /// Sort the merges by height, as scikit-network's `reorder=True` does.
+    /// Scarf leaves them unsorted, which is the default here.
     pub reorder: bool,
     /// How float64 arrays are summed, which sets the last bits of the two
-    /// normalising totals: `None` is NumPy 2 (pairwise over the whole
+    /// normalizing totals: `None` is NumPy 2 (pairwise over the whole
     /// array), `Some(8192)` is NumPy 1.x (pairwise within 8,192-element
     /// buffers, added in order). Only reference tests need to change it.
     pub numpy_sum_block: Option<usize>,
@@ -323,10 +335,10 @@ fn similarity(w: f64, out1: f64, in1: f64, out2: f64, in2: f64) -> f32 {
     }
 }
 
-/// The clusters being aggregated. Neighbour lists are sorted by id and may
+/// The clusters being aggregated. Neighbor lists are sorted by id and may
 /// hold stale entries for clusters merged since (skipped by `active`, and
 /// compacted when they outnumber the live ones), so a merge never has to
-/// search a neighbour's list.
+/// search a neighbor's list.
 struct Aggregate {
     ids: Vec<Vec<u32>>,
     ws: Vec<Vec<f64>>,
@@ -337,7 +349,7 @@ struct Aggregate {
 }
 
 impl Aggregate {
-    /// Nearest active neighbour of `node`: `(id, similarity, n_live)`.
+    /// Nearest active neighbor of `node`: `(id, similarity, n_live)`.
     fn nearest(&mut self, node: usize) -> (usize, f32, usize) {
         let mut max_sim = f32::NEG_INFINITY;
         let mut nearest = usize::MAX;
@@ -410,7 +422,7 @@ impl Aggregate {
                 }
                 q += 1;
             } else {
-                // A common neighbour: the reference adds a's weight, then b's.
+                // A common neighbor: the reference adds a's weight, then b's.
                 if live(ia[p], &self.active) {
                     ids.push(ia[p]);
                     ws.push(wa[p] + wb[q]);
@@ -419,7 +431,7 @@ impl Aggregate {
                 q += 1;
             }
         }
-        // Each neighbour gains `new`, the largest id so far, so appending
+        // Each neighbor gains `new`, the largest id so far, so appending
         // keeps its list sorted; its weight is the same sum (symmetry).
         for (k, &x) in ids.iter().enumerate() {
             self.ids[x as usize].push(new as u32);
@@ -434,14 +446,15 @@ impl Aggregate {
     }
 }
 
-/// Paris hierarchical clustering of a weighted graph given as CSR
-/// (`indptr`, `indices`, `data`, `n` nodes). Rows must be sorted by column
-/// without duplicates, and weights positive and finite (the inputs the
-/// reference is defined on; checked).
+/// Paris hierarchical clustering of a weighted graph given as compressed sparse
+/// rows (`indptr`, `indices`, `data`, `n` nodes).
 ///
-/// Returns the `n - 1` merges (see [`Merge`]). A directed graph is
-/// symmetrised as `A + A.T`, with node weights taken from the directed
-/// graph, as in the reference.
+/// Each row must be sorted by column without duplicates, and the weights must
+/// be positive and finite, the inputs the reference is defined on. Both are
+/// checked. A directed graph is made symmetric as `A + Aᵀ`, with the node
+/// weights taken from the directed graph, as in the reference.
+///
+/// Returns the `n - 1` merges (see [`Merge`]).
 ///
 /// # Errors
 /// [`HierarchyError::TooFewNodes`] below two nodes,
@@ -515,7 +528,7 @@ pub fn paris(
         while let Some(node) = chain.pop() {
             let (nearest, max_sim, live) = agg.nearest(node);
             if live == 0 || nearest == usize::MAX {
-                // No neighbour left: a connected component. (All-`-inf`
+                // No neighbor left: a connected component. (All-`-inf`
                 // similarities cannot occur with positive weights; the
                 // reference would read an unset variable there.)
                 components.push((node, agg.size[node]));
@@ -606,13 +619,14 @@ fn check_dendrogram(d: &[Merge]) -> Result<usize, HierarchyError> {
     Ok(n)
 }
 
-/// Cut a dendrogram into (at least) `n_clusters` clusters, or at a height
-/// `threshold`: scikit-network's `cut_straight`. Merges strictly below the
-/// cut height are kept; equal heights can give more clusters than asked.
+/// Cut a dendrogram into at least `n_clusters` clusters, or at a height
+/// `threshold`, as scikit-network's `cut_straight` does.
 ///
-/// Labels are numbered by decreasing cluster size, ties in order of first
-/// appearance. The partition equals the reference's; label numbers can
-/// differ among equal-size clusters, where NumPy's unstable sort decides.
+/// Merges strictly below the cut height are kept, so equal heights can give
+/// more clusters than asked for. Labels are numbered by decreasing cluster
+/// size, with ties in order of first appearance. The clusters are the same as
+/// the reference's, though the numbers of equal-size clusters can differ,
+/// since NumPy's sort is not stable.
 ///
 /// # Errors
 /// [`HierarchyError::InvalidCut`] for `n_clusters` outside `1..=n` or a
@@ -735,15 +749,17 @@ impl Tree {
     }
 }
 
-/// Scarf's `BalancedCut`: climb from each leaf while the subtree stays at
-/// most `max_size` leaves and the two subtrees being joined have similar
-/// heights (ratio at most `max_distance_fc`, for their own heights and the
-/// mean heights below them, checked once both exceed `min_size` leaves).
+/// Cut the tree into clusters of bounded size, as Scarf's `BalancedCut` does.
 ///
-/// Labels start at 1 in the order clusters are formed, as in Scarf; `-1`
-/// would mark an unassigned leaf (none is expected). One deliberate
-/// difference: when `max_size` admits the whole tree, Scarf raises
-/// (`StopIteration` at the root); here the climb stops at the root.
+/// From each leaf, the cut climbs the tree while the subtree holds at most
+/// `max_size` leaves and the two subtrees being joined have similar heights.
+/// Once both hold more than `min_size` leaves, their heights, and the mean
+/// heights below them, may differ by at most a factor of `max_distance_fc`.
+///
+/// Labels start at 1, in the order the clusters are formed, as in Scarf. A
+/// label of -1 would mark an unassigned leaf, which is not expected to occur.
+/// When `max_size` admits the whole tree, Scarf raises an error at the root,
+/// and this function stops climbing there.
 ///
 /// # Errors
 /// [`HierarchyError::InvalidCut`] for a malformed dendrogram or `max_size`

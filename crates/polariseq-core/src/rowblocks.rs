@@ -1,18 +1,15 @@
-//! One abstraction for every matrix source: blocks of CSR rows.
+//! One interface for every matrix source: blocks of CSR rows.
 //!
-//! Every kernel that loops over rows (QC, gene stats, sparse products,
-//! Gram matrix) runs on a [`RowBlocks`] source instead of a concrete
-//! matrix, so in-RAM, memory-mapped and (later) streamed-from-HDF5 inputs
-//! share one code path. The contract:
+//! Every kernel that loops over rows (quality control, gene statistics, sparse
+//! products, the Gram matrix) runs on a [`RowBlocks`] source, so a matrix in
+//! memory and one read from disk share one code path. The contract:
 //!
-//! - Blocks cover `rows_per_block` rows in row order; `f` receives the
-//!   global row offset and the block as a [`CsrRef`] with `indptr` rebased
-//!   to 0 (the rebase buffer is one small `Vec` per block — blocks are few
-//!   and large).
-//! - Sources may invoke `f` from any thread and in any completion order;
-//!   blocks are disjoint, so kernels fold partials through
-//!   [`BlockFold`], which merges them **in block order** — results are
-//!   bit-identical for any thread count or scheduling.
+//! - Blocks cover `rows_per_block` rows, in row order. `f` receives the global
+//!   offset of the block's first row and the block as a [`CsrRef`], with its
+//!   `indptr` rebased to 0.
+//! - A source may call `f` from any thread and in any order. Blocks are
+//!   disjoint, and kernels combine their partial results in block order, so
+//!   the results have the same bits at any thread count and in any schedule.
 
 #![allow(clippy::module_name_repetitions)]
 

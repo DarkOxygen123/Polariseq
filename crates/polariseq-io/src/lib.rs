@@ -1,28 +1,62 @@
 //! # polariseq-io
 //!
-//! Readers and writers for the on-disk formats biologists already use. Adoption
-//! in bioinformatics is gated on format interop: a new tool that can't read the
-//! `.h5ad` / Zarr files people already have is dead on arrival.
+//! Read single-cell data into [`polariseq_core`] matrices: `.h5ad` files
+//! (`AnnData` on HDF5) and the 10x Genomics `.h5` file and matrix folder, whole
+//! or in blocks of rows, and several files as one dataset. Out of core, it
+//! copies the counts once into a compressed block store and streams passes over
+//! it.
 //!
-//! ## The h5ad format
+//! # Examples
 //!
-//! An `.h5ad` is an HDF5 file with the `anndata` element-encoding spec. Every
-//! element carries `encoding-type` / `encoding-version` attributes so readers
-//! can dispatch:
+//! Read a file's matrix and gene names:
 //!
-//! | Element            | Group / dataset                                          |
-//! |--------------------|----------------------------------------------------------|
-//! | `X` dense          | dataset, attrs `{encoding-type: "array"}`                |
-//! | `X` CSR sparse     | group `{data, indices, indptr}` + attr `shape`           |
-//! | `obs`/`var`        | dataframe group: `_index` + `column-order` attr          |
-//! | categorical column | group `{codes, categories}` + attr `ordered`             |
+//! ```no_run
+//! use polariseq_core::Matrix;
+//! use polariseq_io::AnnDataFile;
 //!
-//! This reader pulls CSR triples directly into [`polariseq_core::CsrMatrix`] and
-//! dense datasets into [`polariseq_core::DenseMatrix`], with zero sparse-libs
-//! dependency in the loop — we control the storage layout end to end.
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let file = AnnDataFile::open("pbmc3k.h5ad")?;
+//! let genes = file.read_var_names()?;
+//! let Matrix::Csr(counts) = file.read_x()? else {
+//!     return Err("X is stored dense".into());
+//! };
+//! println!("{} cells × {} genes", counts.nrows, genes.len());
+//! # Ok(())
+//! # }
+//! ```
 //!
-//! Backed by `hdf5-metno` 0.14 (the maintained fork of `hdf5-rust`; the
-//! original `aldanor/hdf5-rust` 0.8 cannot parse HDF5 2.x).
+//! # Where to find each reader
+//!
+//! | task | module |
+//! |---|---|
+//! | `.h5ad` files | [`h5ad`]: [`AnnDataFile`], [`read_h5ad`] |
+//! | 10x Genomics files | [`tenx`] |
+//! | the `obs` and `var` tables | [`frame`] |
+//! | several files as one dataset | [`merge`] |
+//! | a file's shape and size without reading it | [`lazy`] |
+//! | copying the counts into the block store | [`spill`] |
+//! | passes over a file on disk | [`stream`], [`lazy_compute`] |
+//! | several datasets integrated | [`integrate`], [`stream_correct`] |
+//!
+//! # Requirements
+//!
+//! Rust 1.82 or later. HDF5 is built from source with the crate (the `static`
+//! feature of `hdf5-metno`), so the first build takes a few minutes and needs a
+//! C compiler and CMake.
+//!
+//! # Documentation and citation
+//!
+//! These crates are the computational core of Polariseq, built for single-cell
+//! RNA-seq analysis. The [Polariseq documentation](../../../index.html)
+//! explains the analysis steps, the methods they follow and the Python
+//! interface.
+//!
+//! If you use Polariseq, cite it with the version you used:
+//!
+//! > Uthamkumar M, Dutta A, Basak T. Polariseq: atlas-scale single-cell
+//! > analysis on the computer you have.
+#![doc = concat!("> Version ", env!("CARGO_PKG_VERSION"), " (2026).")]
+//! > <https://github.com/DarkOxygen123/Polariseq>
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -52,11 +86,12 @@ pub mod tenx;
 pub use h5ad::{read_h5ad, AnnDataFile};
 pub use polariseq_core::{matrix::MatrixError, CsrMatrix, DenseMatrix, Matrix};
 
-/// A path or URL we can read from. Cloud object stores (`s3://`, `gcs://`) land
-/// in Phase 6 alongside the Zarr-v3 cloud backend.
+/// A file to read and the format of its bytes. The readers of this crate take
+/// paths directly ([`read_h5ad`], and the 10x readers in [`tenx`]), and this
+/// pairing is used by its tests.
 #[derive(Debug, Clone)]
 pub struct DataSource {
-    /// The on-disk path, `s3://...`/`gcs://...` URL, or local file.
+    /// The file's path.
     pub uri: String,
     /// What format the bytes are in.
     pub format: DataFormat,
@@ -67,11 +102,10 @@ pub struct DataSource {
 pub enum DataFormat {
     /// `AnnData` on HDF5 (`.h5ad`). The single most common on-disk format.
     H5ad,
-    /// `AnnData` on Zarr v2 or v3 (`.h5ad.zarr`). Cloud-native; the recommended
-    /// format going forward, and what Vitessce consumes.
+    /// `AnnData` on Zarr v2 or v3 (`.zarr`). No reader in this crate.
     AnnDataZarr,
-    /// `MuData` on HDF5 (`.h5mu`). Multimodal; each `/mod/<modality>/` subgroup
-    /// is itself an `AnnData`.
+    /// `MuData` on HDF5 (`.h5mu`): multimodal, each `/mod/<modality>/` subgroup
+    /// an `AnnData`. No reader in this crate.
     H5mu,
     /// 10x Cell Ranger matrix market (`matrix.mtx` + barcodes + features).
     Mtx,
@@ -80,12 +114,12 @@ pub enum DataFormat {
 /// Failures raised by IO operations.
 #[derive(Debug, thiserror::Error)]
 pub enum IoError {
-    /// The reader for this format is not implemented yet.
+    /// The format has no reader in this crate.
     #[error("reading `{format}` is not implemented yet (lands in phase {phase})")]
     NotImplemented {
         /// Format name.
         format: &'static str,
-        /// Roadmap phase in which the reader ships.
+        /// Development phase the message names.
         phase: u8,
     },
     /// The HDF5 layer returned an error.
@@ -98,7 +132,7 @@ pub enum IoError {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     /// The arguments ask for something the data cannot give (a gene a filter
-    /// removes, a filter that removes everything); the message says what and why.
+    /// removes, a filter that removes everything). The message says what and why.
     #[error("{0}")]
     Rejected(String),
     /// The file does not match the expected anndata layout.

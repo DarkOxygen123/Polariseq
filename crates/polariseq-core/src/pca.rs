@@ -63,8 +63,8 @@ pub struct PcaOptions {
     /// Oversampling parameter for randomized SVD (sparse path). Extra dimensions
     /// beyond `n_components` to improve accuracy. Halko et al. recommend 2–10.
     pub oversample: usize,
-    /// Number of power iterations for randomized SVD. 0–2 typical; higher
-    /// improves accuracy for slowly-decaying spectra.
+    /// Number of power iterations of the randomized SVD, usually 0 to 2. More
+    /// improves the accuracy when the singular values fall slowly.
     pub n_iter: usize,
     /// Random seed for reproducibility.
     pub seed: u64,
@@ -200,25 +200,33 @@ fn pca_dense_dispatch(d: &DenseMatrix, opts: &PcaOptions) -> Result<PcaResult, P
 /// falls back to randomized block Krylov SVD.
 pub const GRAM_MAX_FEATURES: usize = 4096;
 
-/// PCA on a CSR matrix, taken by reference (no clone at the FFI boundary).
+/// PCA of a CSR matrix, taken by reference.
 ///
-/// Three paths, in order of preference:
-/// - **Tiny** (`min(n, m) < 1000` or many components): exact thin SVD of the
-///   densified matrix.
-/// - **`n_features ≤ 4096`** (the normal case after HVG selection): **exact**
-///   PCA through the centered Gram matrix `AᵀA − nμμᵀ` — one deterministic
-///   pass to build it, a dense symmetric eigendecomposition, one pass to
-///   project `A'V`. No randomness; the flat tail of the spectrum is resolved
-///   exactly.
-/// - **Wider**: randomized block Krylov SVD with implicit centering
-///   ([`crate::rsvd`]); accuracy on the tail depends on `oversample`/`n_iter`.
+/// One of three methods is used, in this order:
 ///
-/// Nothing on the sparse paths densifies or modifies the matrix. The variance
-/// ratio is `λ_j / Σλ` (Gram) or `s_j² / ‖A − 1μᵀ‖²_F` (rSVD) — scanpy's
-/// convention either way.
+/// - **A small matrix** (`min(n, m) < 1000`, or many components): an exact thin
+///   SVD of the matrix made dense.
+/// - **At most 4,096 genes**, the usual case after gene selection: exact PCA
+///   through the centered Gram matrix. One pass builds it, a dense symmetric
+///   eigendecomposition gives the components, and a second pass projects the
+///   cells onto them. Nothing is random, and the small trailing components are
+///   exact.
+/// - **More genes**: randomized block Krylov SVD with implicit centering
+///   ([`crate::rsvd`]), whose accuracy on the trailing components depends on
+///   `oversample` and `n_iter`.
+///
+/// ```text
+/// Gram matrix:      G = AᵀA − n μ μᵀ
+/// variance ratio:   λ_j / Σ λ           (Gram)
+///                   s_j² / ‖A − 1μᵀ‖²   (randomized SVD, Frobenius norm)
+/// ```
+///
+/// Here `μ` holds the gene means, `λ_j` the eigenvalues of `G` and `s_j` the
+/// singular values. Both ratios follow Scanpy's convention. The sparse
+/// methods never make the matrix dense and never change it.
 ///
 /// # Errors
-/// Returns [`PcaError`] on invalid inputs or SVD/eigen failure.
+/// Returns [`PcaError`] for invalid inputs or when the decomposition fails.
 pub fn pca_csr(s: &CsrMatrix, opts: &PcaOptions) -> Result<PcaResult, PcaError> {
     let (n_obs, n_features) = s.shape();
     validate_dims(n_obs, n_features, opts.n_components)?;
@@ -233,12 +241,14 @@ pub fn pca_csr(s: &CsrMatrix, opts: &PcaOptions) -> Result<PcaResult, PcaError> 
 }
 
 /// [`pca_csr`] with the embedding written into `out` (`n_obs × n_components`,
-/// row-major; zeros, or a memory-mapped file): on the exact Gram path nothing
-/// the size of the embedding is allocated. The wide randomized path and the
-/// tiny exact path compute the embedding in memory and copy it over.
+/// row-major, either zeros or a memory-mapped file).
+///
+/// On the exact Gram method nothing the size of the embedding is allocated.
+/// The randomized method and the small exact method compute the embedding in
+/// memory and copy it over.
 ///
 /// # Errors
-/// Returns [`PcaError`] on invalid inputs or SVD/eigen failure.
+/// Returns [`PcaError`] for invalid inputs or when the decomposition fails.
 ///
 /// # Panics
 /// Panics if `out.len() != n_obs * n_components`.
@@ -276,18 +286,18 @@ pub fn pca_csr_into(
     Ok(deliver(finish_rsvd(&r, total_var), out))
 }
 
-/// PCA over any [`RowBlocks`] source — in-RAM, memory-mapped or streamed
-/// from disk — so an out-of-core matrix takes the same route as an in-memory
-/// one and produces the same numbers.
+/// PCA over any [`RowBlocks`] source, in memory or read from disk, so an
+/// out-of-core matrix takes the same route as an in-memory one and gives the
+/// same numbers.
 ///
-/// Uses the exact Gram path when `n_features <= GRAM_MAX_FEATURES` (the
-/// normal case after HVG selection) and randomized block Krylov above it.
-/// Both read the source block by block; neither materialises it. There is no
-/// dense fallback here: a source small enough for the thin-SVD path does not
-/// need to be streamed.
+/// It uses the exact Gram method when `n_features <= GRAM_MAX_FEATURES`, the
+/// usual case after gene selection, and randomized block Krylov SVD above
+/// that. Both read the source block by block and never hold it whole. There is
+/// no dense method here, since a matrix small enough for it needs no
+/// streaming.
 ///
 /// # Errors
-/// Returns [`PcaError`] on invalid inputs or SVD/eigen failure.
+/// Returns [`PcaError`] for invalid inputs or when the decomposition fails.
 pub fn pca_blocks(src: &dyn RowBlocks, opts: &PcaOptions) -> Result<PcaResult, PcaError> {
     let (n_obs, n_features) = (src.n_rows(), src.n_cols());
     validate_dims(n_obs, n_features, opts.n_components)?;
@@ -302,12 +312,13 @@ pub fn pca_blocks(src: &dyn RowBlocks, opts: &PcaOptions) -> Result<PcaResult, P
 }
 
 /// [`pca_blocks`] with the embedding written into `out` (`n_obs ×
-/// n_components`, row-major; zeros, or a memory-mapped file). On the Gram
-/// path each block of rows is projected straight into `out`, so a result of
-/// tens of millions of cells is never held in memory.
+/// n_components`, row-major, either zeros or a memory-mapped file).
+///
+/// On the Gram method each block of rows is projected straight into `out`, so
+/// the embedding of tens of millions of cells is never held in memory.
 ///
 /// # Errors
-/// Returns [`PcaError`] on invalid inputs or SVD/eigen failure.
+/// Returns [`PcaError`] for invalid inputs or when the decomposition fails.
 ///
 /// # Panics
 /// Panics if `out.len() != n_obs * n_components`.
@@ -342,7 +353,7 @@ pub fn pca_blocks_into(
 }
 
 /// PCA of the per-gene standardized matrix: scanpy's `pp.scale` (zero
-/// centre, divide by the `ddof = 1` standard deviation, zero-variance genes
+/// center, divide by the `ddof = 1` standard deviation, zero-variance genes
 /// left at 1, clip to `±max_value`) followed by `tl.pca`, without forming
 /// the scaled matrix.
 ///
@@ -350,10 +361,10 @@ pub fn pca_blocks_into(
 /// written. Instead the clipped standardized matrix is split as
 /// `Z = 1bᵀ + S`, where `b_j` is the value every zero takes in gene `j` and
 /// `S` is sparse with the pattern of `X` (`S_ij = clip((x_ij − μ_j)/σ_j) − b_j`).
-/// A constant shift of each column changes neither a centred covariance nor
-/// a centred projection, so PCA of `Z` is exactly the ordinary centred PCA
+/// A constant shift of each column changes neither a centerd covariance nor
+/// a centerd projection, so PCA of `Z` is exactly the ordinary centerd PCA
 /// of `S`, which [`pca_blocks`] computes over a view that rewrites the
-/// stored values block by block. PCA is always centred here (`opts.center`
+/// stored values block by block. PCA is always centerd here (`opts.center`
 /// is ignored), as scanpy's scaling is.
 ///
 /// # Errors
@@ -766,7 +777,7 @@ mod tests {
         assert!(sparse_total > 0.95, "sparse total {sparse_total}");
     }
 
-    /// Scanpy's `pp.scale(max_value)` on a dense copy: centre, divide by the
+    /// Scanpy's `pp.scale(max_value)` on a dense copy: center, divide by the
     /// `ddof = 1` standard deviation (0 → 1), clip to `±max_value`.
     fn scale_dense_reference(dense: &[f32], n: usize, m: usize, max_value: f32) -> Vec<f32> {
         let mut out = vec![0.0_f32; n * m];

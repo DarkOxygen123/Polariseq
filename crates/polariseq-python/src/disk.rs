@@ -11,7 +11,7 @@
 //!
 //! Every mask and scale is indexed by the rows and columns of the file, so the
 //! views compose in one fixed order whatever order the steps ran in: genes
-//! innermost, then the normalisation (whose scale is per file row), then the
+//! innermost, then the normalization (whose scale is per file row), then the
 //! cells.
 //!
 //! The method names match `SparseMatrix` where the operation is the same
@@ -35,6 +35,8 @@ use pyo3::types::{PyDict, PySlice, PyTuple};
 
 use crate::{de_result_dict, flat_to_pyarray2};
 
+/// The expression matrix of an out-of-core analysis: a view of the on-disk counts in the
+/// project folder, with the cell and gene filters and the normalization applied as blocks are read.
 #[pyclass(name = "DiskMatrix", module = "polariseq._polariseq")]
 pub struct PyDiskMatrix {
     /// Shared by every subset of the same store, so its row pointers are
@@ -74,7 +76,7 @@ impl PyDiskMatrix {
     }
 
     /// Run `f` on the current matrix: the file's counts with the recorded
-    /// gene filter, normalisation and (when `rows`) cell filter applied.
+    /// gene filter, normalization and (when `rows`) cell filter applied.
     fn with_view<R>(&self, src: &FileCsr, rows: bool, f: impl FnOnce(&dyn RowBlocks) -> R) -> R {
         let cols = (src.ncols == self.csr.ncols && self.n_cols_kept < self.csr.ncols)
             .then(|| FilteredCols::new(src, &self.col_keep));

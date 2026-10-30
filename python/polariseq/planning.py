@@ -372,7 +372,13 @@ class StepCost:
 
 @dataclass
 class Plan:
-    """A costed plan for one dataset under one budget."""
+    """What ``ps.plan`` predicts for one dataset under one budget.
+
+    ``fits`` says whether the analysis fits the budget, ``peak_gb`` and
+    ``limiting_step`` give its largest memory need and the step that has it,
+    and ``steps`` the predicted peak of every step. ``report()`` gives it as a
+    table, which ``ps.plan`` prints.
+    """
 
     n_cells: int
     n_genes: int
@@ -408,31 +414,38 @@ class Plan:
 
     @property
     def disk_peak_gb(self) -> float:
+        """The most the project folder holds at once, in gigabytes."""
         return self.disk_peak_bytes / _GB
 
     @property
     def peak_bytes(self) -> int:
+        """The largest predicted memory peak of any step, in bytes."""
         return max((s.peak for s in self.steps), default=0)
 
     @property
     def peak_gb(self) -> float:
+        """The largest predicted memory peak of any step, in gigabytes."""
         return self.peak_bytes / _GB
 
     @property
     def min_budget_gb(self) -> float:
+        """The smallest budget this mode can run in, in gigabytes (0 in memory)."""
         return self.min_budget_bytes / _GB
 
     @property
     def fits(self) -> bool:
+        """Whether the largest peak is within the budget."""
         return self.peak_bytes <= self.budget.ram_bytes
 
     @property
     def limiting_step(self) -> str:
+        """The step with the largest memory peak."""
         if not self.steps:
             return ""
         return max(self.steps, key=lambda s: s.peak).name
 
     def summary(self) -> dict[str, Any]:
+        """The plan as a plain dict: the shape, mode, block size, peaks, budget and every step."""
         return {
             "n_cells": self.n_cells,
             "n_genes": self.n_genes,

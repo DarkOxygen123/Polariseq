@@ -1,34 +1,29 @@
-//! A CSR matrix on disk, read in bounded blocks.
+//! A CSR matrix on disk, read in blocks of bounded size.
 //!
-//! [`DiskBackedCSR`](crate::disk_matrix::DiskBackedCSR) memory-maps its spill
-//! files. That is convenient, but it does not bound memory: every pass over
-//! the matrix touches every page, each touched page becomes resident in *this
-//! process*, and the OS only reclaims under pressure. Measured on
-//! `heart_100k`, private memory tracked the whole matrix (1.14 GB for an
-//! 892 MB matrix) and did not move when the block size was swept over a 32×
-//! range — the mapped pages, not the kernels, were the footprint.
+//! [`FileCsr`] reads each block of rows into a buffer it owns, so a pass over
+//! the matrix holds at most the number of blocks read at once times the block
+//! size: the figure the planner and the
+//! [`RowBlocks`] callers work with. Nothing builds
+//! up from one pass to the next.
 //!
-//! [`FileCsr`] reads each block explicitly into a buffer it owns instead.
-//! The trade:
+//! # Compared with memory-mapping
 //!
-//! - **Footprint becomes exactly what we allocate** — `concurrency × block`,
-//!   which is what [`crate::rowblocks::RowBlocks`] callers and the planner
-//!   already reason about. Nothing accumulates. Measured on the same
-//!   pipeline: private memory 1.30 GB (mmap, unmoved by block size) against
-//!   0.52 / 0.21 / 0.16 GB at 16 384 / 4 096 / 1 024-row blocks — up to 8×
-//!   less, and finally responsive to the knob.
-//! - **Speed is unchanged.** Both paths go through the same page cache, so
-//!   repeated passes still hit warm cache; the difference is one copy per
-//!   byte (memcpy, ~10–20 GB/s, against arithmetic that is far slower) in
-//!   exchange for dropping one page fault per 4 KiB page.
-//! - **It is safe under a memory limit.** Mapped file pages count against a
-//!   cgroup's limit, so mmap-based out-of-core can be OOM-killed in a
-//!   container even though the pages are evictable in principle. A bounded
-//!   read buffer cannot be.
+//! [`DiskBackedCSR`](crate::disk_matrix::DiskBackedCSR) memory-maps its files
+//! instead. That is convenient, but every page a pass touches stays in the
+//! process's memory until the operating system needs it back, so memory grows
+//! with the matrix whatever the block size. On a 100,000-cell dataset, a pass
+//! held 1.3 GB memory-mapped, against 0.16 to 0.52 GB read in blocks of 1,024
+//! to 16,384 rows. Reading into owned buffers has two more properties:
 //!
-//! mmap remains the better tool for *random* access (`head`, `sample`), so
-//! `DiskBackedCSR` keeps its place; this is for the sequential full-matrix
-//! passes that make up the pipeline.
+//! - **The speed is the same.** Both read through the operating system's page
+//!   cache, and copying a block costs little beside the arithmetic done on it.
+//! - **It is safe under a memory limit.** Mapped pages count against a
+//!   container's limit, so a memory-mapped pass can be stopped for using too
+//!   much memory, which a bounded buffer cannot.
+//!
+//! Memory-mapping stays the better tool for random access (`head`, `sample`),
+//! which is what `DiskBackedCSR` is kept for. This type is for the full passes
+//! over the matrix that make up an analysis.
 
 use std::fs::File;
 use std::io;
@@ -84,17 +79,17 @@ fn decode_u32(bytes: &[u8], out: &mut Vec<u32>) {
     );
 }
 
-/// A CSR triple stored as three flat little-endian files, read in blocks.
+/// A CSR matrix stored as three flat little-endian files, read in blocks.
 ///
-/// The row pointers are 64-bit, so a store is not limited to the 2^32 stored
-/// values a 32-bit matrix can address (an atlas of tens of millions of cells
-/// holds tens of billions); stores written before this, with 32-bit row
-/// pointers, are recognized by their size and still read. Each block is
-/// handed to the kernels with 32-bit offsets relative to its first row, which
-/// a block of cells never outgrows. The row pointers are held in memory,
-/// `(nrows + 1) × 8` bytes (8 MB for a million cells), because every block
-/// lookup needs them; the values and column indices, the large arrays, are
-/// never all resident.
+/// The row pointers are 64-bit, so a store can hold more than the 2^32 values a
+/// 32-bit matrix can address, as an atlas of tens of millions of cells does.
+/// Stores with 32-bit row pointers are recognized by their size and read as
+/// well. Each block is handed to the kernels with 32-bit offsets from its first
+/// row, which a block of cells never outgrows.
+///
+/// The row pointers stay in memory, `(nrows + 1) × 8` bytes (8 MB for a
+/// million cells), because every block needs them. The values and column
+/// indices, the large arrays, are never all in memory at once.
 pub struct FileCsr {
     backend: Backend,
     indptr: Vec<u64>,
@@ -208,7 +203,7 @@ impl FileCsr {
         self
     }
 
-    /// Row pointers (resident; small).
+    /// The row pointers, held in memory (they are small).
     #[must_use]
     pub fn indptr(&self) -> &[u64] {
         &self.indptr
@@ -371,7 +366,7 @@ impl Drop for FileCsr {
 
 /// Blocks are read into per-task buffers, so the resident cost of a pass is
 /// `concurrency × block`, not the matrix. Read failures cannot be reported
-/// through the trait, so a failing block is skipped; callers that need the
+/// through the trait, so a failing block is skipped. Callers that need the
 /// error use [`FileCsr::read_rows`] directly.
 impl RowBlocks for FileCsr {
     fn n_rows(&self) -> usize {

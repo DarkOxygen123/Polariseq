@@ -1,10 +1,10 @@
-//! Per-cluster statistics over a file, without materialising it.
+//! Per-cluster statistics over a file, without reading the whole matrix into
+//! memory.
 //!
-//! This module used to carry its own chunk-reading loop and its own
-//! accumulators. It is now a thin adapter: [`H5adStream`] turns the file
-//! into row blocks and [`cluster_stats_blocks`] does the arithmetic — the
-//! same kernel the in-memory path uses, so annotation and marker ranking
-//! give the same answers whether the matrix is in RAM or on disk.
+//! [`H5adStream`] turns the file into blocks of rows, and
+//! [`cluster_stats_blocks`] does the arithmetic. It is the kernel the in-memory
+//! path uses, so cell type scoring and marker ranking give the same answers
+//! whether the matrix is in memory or on disk.
 
 use polariseq_core::preprocess::{
     cluster_stats_blocks, row_totals_blocks, ClusterStats, NormalizedView,
@@ -63,9 +63,9 @@ pub fn streaming_cluster_means(
 }
 
 /// Per-cluster, per-gene statistics over the normalize-total + log1p
-/// transform of the matrix in `path`, without materialising it.
+/// transform of the matrix in `path`, without materializing it.
 ///
-/// Marker ranking and annotation are statements about the *normalised*
+/// Marker ranking and annotation are statements about the *normalized*
 /// matrix — the same transform the pipeline applies before PCA — so offering
 /// only raw-count statistics here would make an out-of-core run and an
 /// in-memory run of the same file answer different questions. The values
@@ -90,11 +90,13 @@ pub fn streaming_cluster_stats_normalized(
     streaming_cluster_stats_normalized_masked(path, labels, n_clusters, target_sum, None)
 }
 
-/// [`streaming_cluster_stats_normalized`] for a gene-filtered analysis: each
-/// row is normalised by its total over the genes flagged in `gene_keep`, as
-/// `normalize_total` would normalise the matrix with the other genes
-/// removed. Statistics are still returned for every gene; the caller drops
-/// the removed ones (see `de::rank_genes_groups_from_stats`).
+/// [`streaming_cluster_stats_normalized`] for an analysis with some genes
+/// removed: each row is normalized by its total over the genes flagged in
+/// `gene_keep`, as `normalize_total` would normalize the matrix with the other
+/// genes removed.
+///
+/// Statistics are still returned for every gene, and the caller drops the
+/// removed ones (see `de::rank_genes_groups_from_stats`).
 ///
 /// # Errors
 /// Returns [`crate::IoError`] if the file cannot be scanned or read, or if
@@ -127,7 +129,7 @@ pub fn streaming_cluster_stats_normalized_masked(
         crate::lazy::read_rows_any(path, 0, 1)?;
     }
     // Pass 1: row totals (summed as `normalize_total` sums them); pass 2:
-    // accumulate the normalised view.
+    // accumulate the normalized view.
     let totals = row_totals_blocks(&stream, gene_keep);
     let scale = NormalizedView::scale_from_totals(&totals, target_sum);
     let view = NormalizedView::new(&stream, scale, true);
@@ -194,8 +196,8 @@ mod tests {
         assert!(streaming_cluster_stats(&fixture(), &[0, 1, 2], 3, 32).is_err());
     }
 
-    /// Normalised streaming statistics must equal the in-memory kernel run
-    /// on the same normalised view — the parity that makes an out-of-core
+    /// Normalized streaming statistics must equal the in-memory kernel run
+    /// on the same normalized view — the parity that makes an out-of-core
     /// marker ranking comparable to an in-memory one.
     #[test]
     fn normalized_streamed_stats_match_in_ram() {
