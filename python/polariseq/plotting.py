@@ -1469,7 +1469,7 @@ def umap(
         panel.
 
     See also:
-        ``ps.tl.umap``, ``ps.pl.embedding``.
+        ``ps.tl.umap`` computes the layout drawn here. ``ps.pl.embedding`` draws any other embedding.
     """
     split_by = kw.pop("split_by", None)
     if split_by is not None:
@@ -1508,7 +1508,8 @@ def pca(
         ```
 
     See also:
-        ``ps.pp.pca``, ``ps.pl.pca_variance_ratio``.
+        ``ps.pp.pca`` computes the components drawn here. ``ps.pl.pca_variance_ratio`` shows the share
+        of the variance each one explains.
     """
     return _embedding(adata, "X_pca", color, ax, size, title, cmap, show,
                       save, legend_loc, **kw)
@@ -2166,7 +2167,7 @@ def highly_variable_genes(adata: AnnData, ax: Any | None = None, show: bool = Tr
         ```
 
     See also:
-        ``ps.pp.highly_variable_genes``.
+        ``ps.pp.highly_variable_genes`` selects the genes plotted here.
     """
     import matplotlib.lines as mlines
     plt = _plt()
@@ -2435,7 +2436,8 @@ def rank_genes_groups(
         A list of axes, one per group; the axis given as ``ax``, when one is.
 
     See also:
-        ``ps.tl.rank_genes_groups``, ``ps.get.markers``.
+        ``ps.tl.rank_genes_groups`` finds the marker genes plotted here. ``ps.get.markers`` gives them
+        as a table.
     """
     plt = _plt()
 
@@ -3014,7 +3016,7 @@ def compare_analyses(analyses: dict, key: str = "leiden", *, basis: str = "X_uma
         ```
 
     See also:
-        ``ps.tl.compare_analyses``.
+        ``ps.tl.compare_analyses`` measures how far the analyses agree.
     """
     from polariseq import AnnData, _checks
     from polariseq._analyses import ari

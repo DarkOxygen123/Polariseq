@@ -2301,7 +2301,8 @@ class _Preprocessing:
             ```
 
         See also:
-            ``ps.pp.renormalize``, ``ps.pp.pca``, ``ps.pl.highly_variable_genes``.
+            ``ps.pp.renormalize`` and ``ps.pp.pca``, the steps that follow. ``ps.pl.highly_variable_genes``
+            plots the genes this selects.
         """
         from polariseq import _checks
 
@@ -2859,7 +2860,8 @@ class _Tools:
             ```
 
         See also:
-            ``ps.get.markers``, ``ps.pl.rank_genes_groups``, ``ps.tl.compare_conditions``.
+            ``ps.get.markers`` gives the result as a table. ``ps.pl.rank_genes_groups`` plots the top genes
+            of each group. ``ps.tl.compare_conditions`` compares conditions with donors as replicates.
         """
         from polariseq._compare import categorical
 
@@ -3005,7 +3007,7 @@ class _Tools:
             ```
 
         See also:
-            ``ps.pl.compare_analyses``.
+            ``ps.pl.compare_analyses`` draws the analyses' clusters side by side.
         """
         from polariseq._analyses import compare_analyses
 
@@ -3650,7 +3652,7 @@ class _Tools:
             ```
 
         See also:
-            ``ps.pl.umap``, ``ps.pp.neighbors``.
+            ``ps.pl.umap`` draws the layout. ``ps.pp.neighbors`` builds the graph it is computed from.
         """
         polariseq_defaults = _WORKFLOW == "polariseq"
         if init is None:
