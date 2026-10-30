@@ -7,8 +7,12 @@
 </figure>
 
 An analysis is one object, `adata`, shaped like Scanpy's AnnData so the same names mean the same
-things. At its center is `X`, the matrix of cells by genes, sparse because most genes are not detected
-in most cells. Everything else is aligned to it:
+things. The object is Polariseq's own class, `ps.AnnData`, and needs no `anndata` package.
+`adata.to_anndata()` converts it when another tool asks for an `anndata.AnnData` (the `anndata`
+extra in [Installation](../install.md)).
+
+At its center is `X`, the matrix of cells by genes, sparse because most genes are not detected in
+most cells. Everything else is aligned to it:
 
 - `obs`: one row per cell, such as its quality metrics, cluster and cell type;
 - `var`: one row per gene, such as its statistics and whether it was selected;

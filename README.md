@@ -67,7 +67,7 @@ pip install "polariseq[plot] @ git+https://github.com/DarkOxygen123/Polariseq.gi
 
 Python 3.10 to 3.14 on macOS, Linux or Windows. pip compiles the Rust core and fetches what the build needs;
 a C compiler is the one tool to have (macOS: `xcode-select --install`; Windows: Build Tools for Visual
-Studio; Linux: usually present). `[plot]` adds the figures; the core alone needs only NumPy and pandas.
+Studio; Linux: usually present). `[plot]` adds the figures; the core alone needs only NumPy and pandas, with no `anndata` package.
 Other extras, each operating system, clusters and offline machines: [INSTALL.md](INSTALL.md).
 
 ## Quick start

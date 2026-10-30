@@ -82,7 +82,8 @@ the [`reproduce`](https://github.com/DarkOxygen123/Polariseq/tree/reproduce) bra
 pip install "polariseq[plot] @ git+https://github.com/DarkOxygen123/Polariseq.git"
 ```
 
-Python 3.10 to 3.14 on macOS, Linux or Windows. Each operating system, the extras, clusters and offline
+Python 3.10 to 3.14 on macOS, Linux or Windows. `[plot]` adds the figures. The core alone needs only
+NumPy and pandas, with no `anndata` package. Each operating system, the extras, clusters and offline
 machines: [Installation](install.md).
 
 ## Quick start

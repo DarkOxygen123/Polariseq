@@ -74,12 +74,18 @@ python -c "import polariseq as ps; print(ps.__version__); print(ps.resources())"
 The install above is the analysis alone: reading `.h5ad` and 10x files, planning, quality control,
 normalization, gene selection, PCA, the neighbor graph, Leiden clustering (multi-level Louvain with
 `method="fast"`), UMAP, Paris, PAGA, marker genes, doublets (Scrublet), integration (Harmony) and comparisons
-between conditions, with NumPy and pandas as its only Python dependencies. Each extra adds one purpose:
+between conditions, with NumPy and pandas as its only Python dependencies.
+
+The `anndata` package is not one of them. The analysis object, `ps.AnnData`, is Polariseq's own: it
+uses AnnData's names, and its matrix is held by the Rust core. Reading and writing `.h5ad` files is done
+by the Rust core too, so a file saved with `adata.write_h5ad` opens in Scanpy without any extra here.
+
+Each extra adds one purpose:
 
 | extra | installs | needed for |
 |---|---|---|
 | `plot` | Matplotlib | every figure: `ps.pl.umap`, dot plots, violins, heatmaps, volcano plots, QC and overview figures, and the figures examples 02, 04, 05 and 06 write |
-| `anndata` | AnnData, SciPy | `adata.to_anndata()` and writing `.h5ad`, to continue in Scanpy, scVI or any tool built on AnnData; example 05 reads its data with it |
+| `anndata` | AnnData, SciPy | `adata.to_anndata()`, which hands the analysis to Scanpy, scVI or any tool built on AnnData in the same Python session; example 05 reads its data with it |
 | `scipy` | SciPy | results as SciPy sparse matrices, to hand to other tools: the neighbor graph in `adata.obsp`, `.to_scipy()`, `adata.sample()` |
 | `markers` | pyreadr, openpyxl | the marker databases fetched on request: `ps.tl.auto_annotate(adata, source="accordion")` (also `"cellmarker"`, `"sctype"`) |
 | `celltypist` | CellTypist, AnnData, SciPy | cell-type annotation with CellTypist models: `ps.tl.auto_annotate(adata, source="celltypist")` |

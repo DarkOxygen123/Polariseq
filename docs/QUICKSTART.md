@@ -98,8 +98,8 @@ ps.pp.neighbors(adata, use_rep="X_pca_harmony")
 ## 6. Hand the results to other tools
 
 ```python
-ad = adata.to_anndata()      # needs pip install anndata
-ad.write_h5ad("pbmc3k_analyzed.h5ad")
+adata.write_h5ad("pbmc3k_analyzed.h5ad")   # opens in Scanpy, cellxgene or R; no extra needed
+ad = adata.to_anndata()                    # an anndata.AnnData in this session; needs pip install anndata
 ```
 
 ## Next
