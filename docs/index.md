@@ -13,54 +13,59 @@ between conditions. It is a Python package with a Rust core that plans each step
 reads, then runs in memory or out of core with the same code. A few million cells fit on an everyday
 computer and tens of millions on one server node.
 
-[Install](install.md){ .md-button .md-button--primary } [Quick start](QUICKSTART.md){ .md-button } [API reference](api/index.md){ .md-button }
+```bash
+pip install "polariseq[plot] @ git+https://github.com/DarkOxygen123/Polariseq.git"
+```
 
-## Highlights
+Python 3.10 to 3.14 on macOS, Linux or Windows. `[plot]` adds the figures. The core alone needs only
+NumPy and pandas, with no `anndata` package.
+
+## Where to start
 
 <div class="grid cards" markdown>
 
--   **Plans before it reads**
+-   **[Getting started](install.md)**
 
     ---
 
-    `ps.plan` predicts the memory and disk of every step from the file's description; `ps.set_budget`
-    holds the run to them.
+    Install Polariseq, then run [a first analysis](QUICKSTART.md) from a file to clusters and marker
+    genes. The [notebook](getting-started/every-command.ipynb) runs every command once.
 
--   **One workflow, any size**
-
-    ---
-
-    The same code runs in memory or out of core, where the counts sit in a lossless store of about one
-    byte per value.
-
--   **Repeatable results**
+-   **[How-to guides](how-to/index.md)**
 
     ---
 
-    The neighbor graph and Leiden clusters are the same at any thread count for a given seed; UMAP
-    layouts can be bit-reproducible.
+    One task each: data larger than memory, doublets, batches, comparing conditions, cell types,
+    figures, saving and export.
 
--   **Several samples**
-
-    ---
-
-    Doublet detection, Harmony integration and comparisons between conditions with donors as replicates.
-
--   **Cell types**
+-   **[API reference](api/index.md)**
 
     ---
 
-    `ps.tl.auto_annotate` names clusters from marker databases, with a score and Cell Ontology terms.
+    Every function of `ps`, `ps.pp`, `ps.tl`, `ps.get` and `ps.pl`, with its arguments, defaults and an
+    example.
 
--   **Part of the ecosystem**
+-   **[Background](background/index.md)**
 
     ---
 
-    Results export to `.h5ad` and AnnData for Scanpy, scVI and the tools built on them.
+    How Polariseq works: the analysis object, memory and planning, out-of-core analysis, and
+    reproducible results. [Methods](METHODS.md) gives the algorithms and their sources.
+
+-   **[Rust](rust/index.md)**
+
+    ---
+
+    The Rust core used directly, with the crates' API reference.
+
+-   **[Source on GitHub](https://github.com/DarkOxygen123/Polariseq)**
+
+    ---
+
+    The code, the [example scripts](how-to/examples/index.md), issues, and the
+    [`reproduce`](https://github.com/DarkOxygen123/Polariseq/tree/reproduce) branch with the benchmarks.
 
 </div>
-
-How each step works: [Methods](METHODS.md).
 
 ## An atlas on a laptop
 
@@ -75,44 +80,6 @@ How each step works: [Methods](METHODS.md).
 <small>Quality control through clustering, out of core, default settings, 6 GB budget, median of 3 runs.
 Peak resident memory; the macOS physical footprint peaked at 3.9 GB and 5.7 GB. Scripts and results are on
 the [`reproduce`](https://github.com/DarkOxygen123/Polariseq/tree/reproduce) branch.</small>
-
-## Install
-
-```bash
-pip install "polariseq[plot] @ git+https://github.com/DarkOxygen123/Polariseq.git"
-```
-
-Python 3.10 to 3.14 on macOS, Linux or Windows. `[plot]` adds the figures. The core alone needs only
-NumPy and pandas, with no `anndata` package. Each operating system, the extras, clusters and offline
-machines: [Installation](install.md).
-
-## Quick start
-
-```python
-import polariseq as ps
-
-ps.project("my_analysis")           # folder for everything Polariseq writes
-ps.set_budget(ram_gb=6, threads=4)  # the memory and threads it may use
-
-ps.plan("data.h5ad")                # predicted memory and disk, before reading
-adata = ps.read_h5ad("data.h5ad")   # adata.mode says where the analysis runs
-
-ps.pp.calculate_qc_metrics(adata)
-ps.pp.filter_cells(adata, min_genes=200)
-ps.pp.filter_genes(adata, min_cells=3)
-ps.pp.normalize_total(adata, target_sum=1e4)
-ps.pp.log1p(adata)
-ps.pp.highly_variable_genes(adata, n_top_genes=2000, subset=True)
-ps.pp.renormalize(adata)            # each cell normalized again over the selected genes
-ps.pp.pca(adata, n_components=50, scale=True)
-ps.pp.neighbors(adata, n_neighbors=15)
-ps.tl.leiden(adata, resolution=1.0)
-ps.tl.umap(adata)
-
-ps.tl.rank_genes_groups(adata, groupby="leiden")
-print(ps.get.markers(adata, n=5))   # top marker genes of each cluster
-ps.pl.umap(adata, color="leiden", show=False, save="umap.png")
-```
 
 ## Citation
 

@@ -10,12 +10,13 @@
   <img src="https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-3E7FC1?labelColor=2E3340" alt="macOS, Linux and Windows">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-3E7FC1?labelColor=2E3340" alt="PolyForm Noncommercial 1.0.0"></a>
   <a href="https://github.com/DarkOxygen123/Polariseq/actions"><img src="https://img.shields.io/github/actions/workflow/status/DarkOxygen123/Polariseq/ci.yml?branch=main&label=CI&labelColor=2E3340" alt="CI status"></a>
+  <a href="https://darkoxygen123.github.io/Polariseq/"><img src="https://img.shields.io/badge/docs-darkoxygen123.github.io-3E7FC1?labelColor=2E3340" alt="Documentation"></a>
 </p>
 
 <p align="center">
   <a href="#install"><b>Install</b></a> &nbsp;·&nbsp;
   <a href="#quick-start"><b>Quick start</b></a> &nbsp;·&nbsp;
-  <a href="#documentation"><b>Documentation</b></a> &nbsp;·&nbsp;
+  <a href="https://darkoxygen123.github.io/Polariseq/"><b>Documentation</b></a> &nbsp;·&nbsp;
   <a href="https://github.com/DarkOxygen123/Polariseq/tree/reproduce"><b>Reproduce</b></a>
 </p>
 
@@ -39,7 +40,7 @@ computer and tens of millions on one server node.
 </tr>
 </table>
 
-How each step works: [Methods](docs/METHODS.md).
+How each step works: [Methods](https://darkoxygen123.github.io/Polariseq/METHODS/).
 
 ## An atlas on a laptop
 
@@ -68,7 +69,7 @@ pip install "polariseq[plot] @ git+https://github.com/DarkOxygen123/Polariseq.gi
 Python 3.10 to 3.14 on macOS, Linux or Windows. pip compiles the Rust core and fetches what the build needs;
 a C compiler is the one tool to have (macOS: `xcode-select --install`; Windows: Build Tools for Visual
 Studio; Linux: usually present). `[plot]` adds the figures; the core alone needs only NumPy and pandas, with no `anndata` package.
-Other extras, each operating system, clusters and offline machines: [INSTALL.md](INSTALL.md).
+Other extras, each operating system, clusters and offline machines: [Installation](https://darkoxygen123.github.io/Polariseq/install/).
 
 ## Quick start
 
@@ -100,19 +101,18 @@ ps.pl.umap(adata, color="leiden", show=False, save="umap.png")
 
 ## Documentation
 
-The documentation website, **https://darkoxygen123.github.io/Polariseq/**, has the guides, the API
-reference and the Rust crates' reference. The same pages are in the repository:
+The documentation is at **https://darkoxygen123.github.io/Polariseq/**.
 
 | | |
 |---|---|
-| [Quick start](docs/QUICKSTART.md) | a first analysis, step by step, in ten minutes |
-| [User guide](docs/GUIDE.md) | what Polariseq does, inputs, the whole analysis in one call, good to know |
-| [Plotting](docs/PLOTTING.md) | figure gallery, every plot type and the themes |
-| [Methods](docs/METHODS.md) | the algorithms and optimizations, and the work they build on |
-| [API reference](docs/API.md) | every function with its arguments, types and defaults |
-| [Examples](examples/) | seven runnable scripts, from a first analysis to a run of millions of cells |
-| [Notebook](notebooks/02_every_command.ipynb) | every command run once |
-| [Installation](INSTALL.md) | each operating system, extras, cluster nodes, offline machines, from source |
+| [Installation](https://darkoxygen123.github.io/Polariseq/install/) | each operating system, the extras, cluster nodes, offline machines, building from source |
+| [A first analysis](https://darkoxygen123.github.io/Polariseq/QUICKSTART/) | from a file to clusters and marker genes, step by step |
+| [How-to guides](https://darkoxygen123.github.io/Polariseq/how-to/) | one task each: data larger than memory, doublets, batches, conditions, cell types, figures, export |
+| [Example scripts](https://darkoxygen123.github.io/Polariseq/how-to/examples/) | seven runnable scripts, from a first analysis to a run of millions of cells |
+| [API reference](https://darkoxygen123.github.io/Polariseq/api/) | every function with its arguments, defaults and an example |
+| [Background](https://darkoxygen123.github.io/Polariseq/background/) | the analysis object, memory and planning, out-of-core analysis, reproducibility |
+| [Methods](https://darkoxygen123.github.io/Polariseq/METHODS/) | the algorithms, the work they build on, and their references |
+| [Rust crates](https://darkoxygen123.github.io/Polariseq/rust/) | the Rust core used directly, with its API reference |
 | [Reproduce](https://github.com/DarkOxygen123/Polariseq/tree/reproduce) | the benchmark scripts and their results |
 
 Questions and bugs: [open an issue](https://github.com/DarkOxygen123/Polariseq/issues) with what you ran,
