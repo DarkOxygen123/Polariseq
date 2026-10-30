@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="#install"><b>Install</b></a> &nbsp;·&nbsp;
-  <a href="#quick-start"><b>Quick start</b></a> &nbsp;·&nbsp;
+  <a href="https://darkoxygen123.github.io/Polariseq/QUICKSTART/"><b>Quick start</b></a> &nbsp;·&nbsp;
   <a href="https://darkoxygen123.github.io/Polariseq/"><b>Documentation</b></a> &nbsp;·&nbsp;
   <a href="https://github.com/DarkOxygen123/Polariseq/tree/reproduce"><b>Reproduce</b></a>
 </p>
@@ -73,31 +73,8 @@ Other extras, each operating system, clusters and offline machines: [Installatio
 
 ## Quick start
 
-```python
-import polariseq as ps
-
-ps.project("my_analysis")           # folder for everything Polariseq writes
-ps.set_budget(ram_gb=6, threads=4)  # the memory and threads it may use
-
-ps.plan("data.h5ad")                # predicted memory and disk, before reading
-adata = ps.read_h5ad("data.h5ad")   # adata.mode says where the analysis runs
-
-ps.pp.calculate_qc_metrics(adata)
-ps.pp.filter_cells(adata, min_genes=200)
-ps.pp.filter_genes(adata, min_cells=3)
-ps.pp.normalize_total(adata, target_sum=1e4)
-ps.pp.log1p(adata)
-ps.pp.highly_variable_genes(adata, n_top_genes=2000, subset=True)
-ps.pp.renormalize(adata)            # each cell normalized again over the selected genes
-ps.pp.pca(adata, n_components=50, scale=True)
-ps.pp.neighbors(adata, n_neighbors=15)
-ps.tl.leiden(adata, resolution=1.0)
-ps.tl.umap(adata)
-
-ps.tl.rank_genes_groups(adata, groupby="leiden")
-print(ps.get.markers(adata, n=5))   # top marker genes of each cluster
-ps.pl.umap(adata, color="leiden", show=False, save="umap.png")
-```
+[A first analysis](https://darkoxygen123.github.io/Polariseq/QUICKSTART/) goes from a file to clusters and
+marker genes, step by step.
 
 ## Documentation
 
